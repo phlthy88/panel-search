@@ -1,0 +1,13 @@
+{
+  "name": "Panel Search",
+  "description": "Search widget in top panel with web search, fuzzy file/app/settings search, and utility functions",
+  "uuid": "panel-search@jlf88",
+  "shell-version": [
+    "48",
+    "49",
+    "50"
+  ],
+  "version": 1,
+  "url": "https://github.com/jlf88/panel-search",
+  "settings-schema": "org.gnome.shell.extensions.panel-search"
+}

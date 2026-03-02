@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<schemalist>
+  <schema id="org.gnome.shell.extensions.panel-search" path="/org/gnome/shell/extensions/panel-search/">
+    <key name="search-engine" type="s">
+      <default>"google"</default>
+      <summary>Default search engine</summary>
+      <description>Search engine to use for web searches (google, duckduckgo, bing)</description>
+    </key>
+    <key name="panel-position" type="i">
+      <default>0</default>
+      <summary>Position in panel</summary>
+      <description>Position index in the panel (0 = leftmost)</description>
+    </key>
+    <key name="panel-box" type="s">
+      <default>"left"</default>
+      <summary>Panel box location</summary>
+      <description>Which box to place the widget in (left, center, right)</description>
+    </key>
+    <key name="usage-history" type="s">
+      <default>"{}"</default>
+      <summary>Search usage history</summary>
+      <description>JSON object tracking search frequency and recency for predictions</description>
+    </key>
+    <key name="max-predictions" type="i">
+      <default>3</default>
+      <summary>Maximum predictions to show</summary>
+      <description>Number of predictive suggestions to display (0-5)</description>
+    </key>
+  </schema>
+</schemalist>
