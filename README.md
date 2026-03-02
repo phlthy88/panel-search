@@ -21,12 +21,12 @@ A modern search widget for GNOME Shell 48-50 that integrates into the top panel,
 
 1. Copy the extension directory to GNOME Shell extensions folder:
    ```bash
-   cp -r panel-search@phlthy88 ~/.local/share/gnome-shell/extensions/
+   cp -r panel-search@phlthy88.github.io ~/.local/share/gnome-shell/extensions/
    ```
 
 2. Compile the GSettings schema:
    ```bash
-   cd ~/.local/share/gnome-shell/extensions/panel-search@phlthy88
+   cd ~/.local/share/gnome-shell/extensions/panel-search@phlthy88.github.io
    glib-compile-schemas schemas/
    ```
 
@@ -36,14 +36,14 @@ A modern search widget for GNOME Shell 48-50 that integrates into the top panel,
 
 4. Enable the extension:
    ```bash
-   gnome-extensions enable panel-search@phlthy88
+   gnome-extensions enable panel-search@phlthy88.github.io
    ```
 
 ## Configuration
 
 Access preferences through GNOME Extensions app or:
 ```bash
-gnome-extensions prefs panel-search@phlthy88
+gnome-extensions prefs panel-search@phlthy88.github.io
 ```
 
 ### Settings:
