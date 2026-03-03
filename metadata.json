@@ -1,7 +1,9 @@
 {
   "name": "Panel Search",
   "description": "Search widget in top panel with web search, fuzzy file/app/settings search, and utility functions",
-  "uuid": "panel-search@jlf88",
+  "uuid": "panel-search@phlthy88.github.io",
+  "version": 1,
+  "gettext-domain": "panel-search",
   "shell-version": [
     "48",
     "49",

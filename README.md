@@ -83,7 +83,7 @@ gnome-extensions prefs panel-search@phlthy88.github.io
 
 ## License
 
-MIT License - Feel free to modify and distribute
+This extension is licensed under the GNU General Public License v3 or later. See LICENSE for details.
 
 ## Development
 
