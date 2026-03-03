@@ -33,7 +33,7 @@ export function fuzzyScore(query, text, preLowercased = false) {
     for (let i = 0; i < positions.length; i++) {
         const pos = positions[i];
         const prev = pos > 0 ? t[pos - 1] : '';
-        if (pos === 0 || !/[a-z0-9]/.test(prev))
+        if (pos === 0 || !/[a-zA-Z0-9]/.test(prev))
             score += 4;
 
         if (i === 0)

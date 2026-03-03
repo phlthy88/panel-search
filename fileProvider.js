@@ -86,10 +86,7 @@ export class FileSearchProvider {
         );
         if (cancellable?.is_cancelled()) return [];
 
-        const ranked = rawFiles
-        .filter(f => f.score > 0)
-        .sort((a, b) => b.score - a.score)
-        .slice(0, maxResults);
+        const ranked = rawFiles.slice(0, maxResults);
 
         return ranked.map(f => ({
             label: f.name,

@@ -193,7 +193,6 @@ export default class PanelSearchPreferences extends ExtensionPreferences {
 
         const fileRootPathRow = new Adw.EntryRow({
             title: 'File Search Root',
-            text: settings.get_string('file-search-root-path'),
             show_apply_button: true,
             tooltip_text: 'Absolute path or path relative to home (blank = home directory)'
         });
