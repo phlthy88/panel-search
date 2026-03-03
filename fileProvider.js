@@ -12,18 +12,6 @@ export class FileSearchProvider {
         this._scannerRootPath = GLib.get_home_dir();
     }
 
-    _getMinQueryLength() {
-        let value;
-        try {
-            value = this._settings?.get_int?.('file-search-min-query-length');
-        } catch (_e) {
-            return 3;
-        }
-        if (!Number.isFinite(value))
-            return 3;
-        return Math.max(1, Math.min(20, value));
-    }
-
     _getMaxScanDepth() {
         let value;
         try {
@@ -65,16 +53,9 @@ export class FileSearchProvider {
         const configured = this._getConfiguredRootPath();
         if (!configured)
             return GLib.get_home_dir();
-        const candidate = GLib.path_is_absolute(configured)
+        return GLib.path_is_absolute(configured)
             ? configured
             : GLib.build_filenamev([GLib.get_home_dir(), configured]);
-        try {
-            const file = Gio.File.new_for_path(candidate);
-            const fileType = file.query_file_type(Gio.FileQueryInfoFlags.NOFOLLOW_SYMLINKS, null);
-            if (fileType === Gio.FileType.DIRECTORY)
-                return candidate;
-        } catch (_e) {}
-        return GLib.get_home_dir();
     }
 
     _getScanner() {
@@ -94,7 +75,7 @@ export class FileSearchProvider {
      * @returns {Promise<Array>} - Array of ranked suggestion objects.
      */
     async getSuggestions(query, maxResults = 10, cancellable = null) {
-        if (!query || query.length < this._getMinQueryLength()) return [];
+        if (!query) return [];
 
         const rawFiles = await this._getScanner().scan(
             query,

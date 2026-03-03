@@ -337,6 +337,18 @@ class PanelSearchWidget extends St.BoxLayout {
                 }
                 this._renderCurrentQuery();
             }) },
+            { obj: this._settings, id: this._settings.connect('changed::file-search-root-path', () => {
+                const query = this._searchEntry?.get_text?.().trim() ?? '';
+                this._fileSuggestCancellable?.cancel();
+                this._fileSuggestCancellable = null;
+                this._fileSuggestions = [];
+                this._fileSearchError = null;
+                if (this._settings?.get_boolean('enable-file-search') &&
+                    query.length >= this._getFileSearchMinQueryLength()) {
+                    this._injectFileSuggestions(query);
+                }
+                this._renderCurrentQuery();
+            }) },
             { obj: this._resultsMenu.actor, id: this._resultsMenu.actor.connect('enter-event', () => { this._menuHovered = true; }) },
             { obj: this._resultsMenu.actor, id: this._resultsMenu.actor.connect('leave-event', () => { this._menuHovered = false; }) },
             { obj: text, id: text.connect('key-focus-out', () => {
