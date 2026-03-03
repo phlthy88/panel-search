@@ -12,6 +12,13 @@ export class FileSearchProvider {
         this._scanner = new FileScanner(GLib.get_home_dir());
     }
 
+    _getMinQueryLength() {
+        const value = this._settings?.get_int('file-search-min-query-length');
+        if (!Number.isFinite(value))
+            return 3;
+        return Math.max(1, Math.min(20, value));
+    }
+
     /**
      * Get ranked suggestions for the query.
      * @param {string} query - The search query.
@@ -20,7 +27,7 @@ export class FileSearchProvider {
      * @returns {Promise<Array>} - Array of ranked suggestion objects.
      */
     async getSuggestions(query, maxResults = 10, cancellable = null) {
-        if (!query || query.length < 3) return [];
+        if (!query || query.length < this._getMinQueryLength()) return [];
 
         const rawFiles = await this._scanner.scan(query, maxResults * 5, cancellable, 2, 50);
         if (cancellable?.is_cancelled()) return [];

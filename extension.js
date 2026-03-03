@@ -227,6 +227,7 @@ class PanelSearchWidget extends St.BoxLayout {
         this._webSuggestions = [];
         this._packageSuggestions = [];
         this._fileSuggestions = [];
+        this._fileSearchError = null;
         this._weatherSuggestions = [];
         this._fileSearchProvider = new FileSearchProvider(settings);
         this._soupSession = new Soup.Session();
@@ -300,10 +301,10 @@ class PanelSearchWidget extends St.BoxLayout {
             { obj: this._settings, id: this._settings.connect('changed::enable-file-search', () => {
                 const enabled = this._settings?.get_boolean('enable-file-search');
                 if (enabled) {
-                    this._trackerFileSearchDisabled = false;
-                    this._trackerUnavailableLogged = false;
+                    this._fileSearchError = null;
                 } else {
                     this._fileSuggestions = [];
+                    this._fileSearchError = null;
                 }
             }) },
             { obj: this._settings, id: this._settings.connect('changed::enable-package-search', () => {
@@ -904,7 +905,6 @@ class PanelSearchWidget extends St.BoxLayout {
         }).catch(e => console.error('Panel Search: Weather suggestion error:', e));
     }
 
-    _getActivationTimestamp() {
     _injectFileSuggestions(query) {
         if (this._fileSuggestCancellable) {
             this._fileSuggestCancellable.cancel();
@@ -921,6 +921,8 @@ class PanelSearchWidget extends St.BoxLayout {
         ).then(suggestions => {
             if (!this._searchEntry || this._searchEntry.get_text().trim() !== query || !suggestions)
                 return;
+
+            this._fileSearchError = null;
 
             const changed = JSON.stringify(suggestions.map(s => `${s.label}:${s.subtitle}`)) !==
                 JSON.stringify(this._fileSuggestions.map(s => `${s.label}:${s.subtitle}`));
@@ -944,6 +946,10 @@ class PanelSearchWidget extends St.BoxLayout {
         }).catch(e => {
             if (!e.matches?.(Gio.IOErrorEnum, Gio.IOErrorEnum.CANCELLED)) {
                 console.error('Panel Search: File suggestion error:', e);
+                this._fileSuggestions = [];
+                this._fileSearchError = 'File search unavailable';
+                if (this._searchEntry && this._searchEntry.get_text().trim() === query)
+                    this._renderResults(query);
             }
         }).finally(() => {
             if (this._fileSuggestCancellable === cancellable)
@@ -965,6 +971,7 @@ class PanelSearchWidget extends St.BoxLayout {
             this._webSuggestions = [];
             this._packageSuggestions = [];
             this._fileSuggestions = [];
+            this._fileSearchError = null;
             this._weatherSuggestions = [];
             this._lastQuery = query;
         }
@@ -974,8 +981,10 @@ class PanelSearchWidget extends St.BoxLayout {
             return;
         }
 
-        if (!this._settings.get_boolean('enable-file-search'))
+        if (!this._settings.get_boolean('enable-file-search')) {
             this._fileSuggestions = [];
+            this._fileSearchError = null;
+        }
         if (!this._settings.get_boolean('enable-weather-search'))
             this._weatherSuggestions = [];
         if (!this._settings.get_boolean('enable-package-search'))
@@ -1174,11 +1183,18 @@ class PanelSearchWidget extends St.BoxLayout {
             files.forEach(row => this._addResult(row.label, row.subtitle, row.action, row.icon));
         }
 
+        const fileSearchError = this._settings.get_boolean('enable-file-search') ? this._fileSearchError : null;
+        if (fileSearchError) {
+            if (completions.length > 0 || packages.length > 0 || files.length > 0)
+                this._resultsMenu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem());
+            this._addResult('File Search', fileSearchError, null, 'dialog-warning-symbolic');
+        }
+
         const weather = this._settings.get_boolean('enable-weather-search')
             ? this._weatherSuggestions.slice(0, WEATHER_SUGGESTIONS_MAX)
             : [];
         if (weather.length > 0) {
-            if (completions.length > 0 || packages.length > 0 || files.length > 0)
+            if (completions.length > 0 || packages.length > 0 || files.length > 0 || fileSearchError)
                 this._resultsMenu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem());
             weather.forEach(row => this._addResult(row.label, row.subtitle, row.action, row.icon));
         }
@@ -1189,12 +1205,12 @@ class PanelSearchWidget extends St.BoxLayout {
             : 5;
         const local = this._getLocalSection(query, lowerQuery, usageData, now, safeMaxPredictions);
         if (local.length > 0) {
-            if (completions.length > 0 || packages.length > 0 || files.length > 0 || weather.length > 0)
+            if (completions.length > 0 || packages.length > 0 || files.length > 0 || fileSearchError || weather.length > 0)
                 this._resultsMenu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem());
             local.forEach(row => this._addResult(row.label, row.subtitle, row.action, row.icon));
         }
 
-        if (completions.length > 0 || packages.length > 0 || files.length > 0 || weather.length > 0 || local.length > 0)
+        if (completions.length > 0 || packages.length > 0 || files.length > 0 || fileSearchError || weather.length > 0 || local.length > 0)
             this._resultsMenu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem());
 
         const engineName = engine.charAt(0).toUpperCase() + engine.slice(1);
