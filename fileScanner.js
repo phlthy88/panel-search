@@ -54,8 +54,7 @@ export class FileScanner {
                         } catch (e) {
                             reject(e);
                         }
-                    }
-                );
+                    });
             });
         } catch (e) {
             if (e.matches?.(Gio.IOErrorEnum, Gio.IOErrorEnum.CANCELLED)) {
@@ -132,23 +131,19 @@ export class FileScanner {
             }
         } finally {
             if (enumerator) {
-                await new Promise((resolve, reject) => {
-                    enumerator.close_async(GLib.PRIORITY_DEFAULT, cancellable, (obj, res) => {
+                await new Promise(resolve => {
+                    // Always pass null here so close is not short-circuited by a cancelled
+                    // user search operation. This guarantees the enumerator fd is released.
+                    enumerator.close_async(GLib.PRIORITY_DEFAULT, null, (obj, res) => {
                         try {
                             resolve(obj.close_finish(res));
                         } catch (e) {
-                            if (e.matches?.(Gio.IOErrorEnum, Gio.IOErrorEnum.CANCELLED)) {
-                                reject(e);
-                                return;
-                            }
-
                             const path = directory.get_path() || directory.get_uri();
                             console.debug(`FileScanner: Failed to close enumerator for ${path}:`, e.message);
                             resolve(false);
                         }
                     });
-                }
-                );
+                });
             }
         }
     }

@@ -99,3 +99,13 @@ The extension uses modern GNOME Shell APIs and ESM imports. Key files:
 - Performance optimized with debounced search
 - Memory-safe resource management
 - Comprehensive error handling
+
+## Packaging for release
+
+Create a release zip that contains only runtime extension files:
+
+```bash
+./scripts/package-extension.sh
+```
+
+This writes `dist/panel-search@phlthy88.github.io.zip`, excluding development and QA artifacts.
