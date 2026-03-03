@@ -3,7 +3,7 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 OUT_DIR="${1:-$ROOT_DIR/dist}"
-UUID="$(jq -r '.uuid' "$ROOT_DIR/metadata.json")"
+UUID="panel-search@phlthy88.github.io"
 ZIP_PATH="$OUT_DIR/$UUID.zip"
 
 mkdir -p "$OUT_DIR"

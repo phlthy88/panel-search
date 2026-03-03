@@ -235,8 +235,11 @@ class PanelSearchWidget extends St.BoxLayout {
         this._packageSuggestCancellable = null;
         this._fileSuggestCancellable = null;
         this._weatherSuggestCancellable = null;
+        this._activatePackageCancellable = null;
+        this._softwareProxyCancellable = null;
         this._softwareProxy = null;
         this._softwareProxyInit = null;
+        this._resultsMenuActor = null;
         this._softwareUnavailableLogged = false;
         this._lastQuery = '';
         this._menuHovered = false;
@@ -285,8 +288,9 @@ class PanelSearchWidget extends St.BoxLayout {
         // Results popup
         this._resultsMenu = new PopupMenu.PopupMenu(this, 0.5, St.Side.TOP);
         this._resultsMenu.box.add_style_class_name('panel-search-results');
-        Main.uiGroup.add_child(this._resultsMenu.actor);
-        this._resultsMenu.actor.hide();
+        this._resultsMenuActor = this._resultsMenu.actor ?? this._resultsMenu;
+        Main.uiGroup.add_child(this._resultsMenuActor);
+        this._resultsMenuActor.hide();
 
         // Signals
         const text = this._searchEntry.clutter_text;
@@ -351,8 +355,8 @@ class PanelSearchWidget extends St.BoxLayout {
                 }
                 this._renderCurrentQuery();
             }) },
-            { obj: this._resultsMenu.actor, id: this._resultsMenu.actor.connect('enter-event', () => { this._menuHovered = true; }) },
-            { obj: this._resultsMenu.actor, id: this._resultsMenu.actor.connect('leave-event', () => { this._menuHovered = false; }) },
+            { obj: this._resultsMenuActor, id: this._resultsMenuActor.connect('enter-event', () => { this._menuHovered = true; }) },
+            { obj: this._resultsMenuActor, id: this._resultsMenuActor.connect('leave-event', () => { this._menuHovered = false; }) },
             { obj: text, id: text.connect('key-focus-out', () => {
                 if (this._focusOutTimeoutId) {
                     GLib.source_remove(this._focusOutTimeoutId);
@@ -619,6 +623,9 @@ class PanelSearchWidget extends St.BoxLayout {
         if (this._softwareProxyInit)
             return this._softwareProxyInit;
 
+        const proxyCancellable = new Gio.Cancellable();
+        this._softwareProxyCancellable = proxyCancellable;
+
         this._softwareProxyInit = new Promise(resolve => {
             Gio.DBusProxy.new_for_bus(
                 Gio.BusType.SESSION,
@@ -627,17 +634,19 @@ class PanelSearchWidget extends St.BoxLayout {
                 SOFTWARE_SEARCH_PROVIDER_BUS,
                 SOFTWARE_SEARCH_PROVIDER_PATH,
                 SOFTWARE_SEARCH_PROVIDER_IFACE,
-                null,
+                proxyCancellable,
                 (_obj, res) => {
                     try {
                         this._softwareProxy = Gio.DBusProxy.new_for_bus_finish(res);
                     } catch (e) {
-                        if (!this._softwareUnavailableLogged) {
+                        if (!e.matches?.(Gio.IOErrorEnum, Gio.IOErrorEnum.CANCELLED) && !this._softwareUnavailableLogged) {
                             console.error('Panel Search: GNOME Software search provider unavailable:', e);
                             this._softwareUnavailableLogged = true;
                         }
                         this._softwareProxy = null;
                     } finally {
+                        if (this._softwareProxyCancellable === proxyCancellable)
+                            this._softwareProxyCancellable = null;
                         resolve(this._softwareProxy);
                     }
                 }
@@ -702,6 +711,8 @@ class PanelSearchWidget extends St.BoxLayout {
 
         try {
             const proxy = await this._ensureSoftwareProxy();
+            if (!this._searchEntry)
+                return [];
             if (!proxy)
                 return [];
 
@@ -763,6 +774,10 @@ class PanelSearchWidget extends St.BoxLayout {
     }
 
     _activatePackageSuggestion(resultId, query) {
+        this._activatePackageCancellable?.cancel();
+        const cancellable = new Gio.Cancellable();
+        this._activatePackageCancellable = cancellable;
+
         this._ensureSoftwareProxy().then(proxy => {
             if (!proxy)
                 return;
@@ -772,12 +787,16 @@ class PanelSearchWidget extends St.BoxLayout {
                 new GLib.Variant('(sasu)', [resultId, [query], this._getActivationTimestamp()]),
                 Gio.DBusCallFlags.NONE,
                 -1,
-                null,
+                cancellable,
                 (_obj, res) => {
                     try {
                         proxy.call_finish(res);
                     } catch (e) {
-                        console.error(`Panel Search: Failed to activate package suggestion ${resultId}:`, e);
+                        if (!e.matches?.(Gio.IOErrorEnum, Gio.IOErrorEnum.CANCELLED))
+                            console.error(`Panel Search: Failed to activate package suggestion ${resultId}:`, e);
+                    } finally {
+                        if (this._activatePackageCancellable === cancellable)
+                            this._activatePackageCancellable = null;
                     }
                 }
             );
@@ -1509,6 +1528,16 @@ class PanelSearchWidget extends St.BoxLayout {
             this._weatherSuggestCancellable = null;
         }
 
+        if (this._activatePackageCancellable) {
+            this._activatePackageCancellable.cancel();
+            this._activatePackageCancellable = null;
+        }
+
+        if (this._softwareProxyCancellable) {
+            this._softwareProxyCancellable.cancel();
+            this._softwareProxyCancellable = null;
+        }
+
         // Abort any in-flight HTTP requests before nulling the session
         if (this._soupSession) {
             this._soupSession.abort();
@@ -1535,6 +1564,7 @@ class PanelSearchWidget extends St.BoxLayout {
         }
         this._softwareProxy = null;
         this._softwareProxyInit = null;
+        this._resultsMenuActor = null;
 
         super.destroy();
     }
