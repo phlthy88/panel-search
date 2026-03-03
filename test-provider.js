@@ -71,4 +71,35 @@ runner.add('FileSearchProvider should return ranked suggestions with icons', asy
     }
 });
 
+runner.add('FileSearchProvider should return fuzzy matches without contiguous substring', async () => {
+    const tmpBase = `/tmp/panel-search-provider-fuzzy-test-${Math.floor(Math.random() * 1000000)}`;
+    const tmpDir = Gio.File.new_for_path(tmpBase);
+    tmpDir.make_directory_with_parents(null);
+
+    const fuzzyFile = tmpDir.get_child('my_important_notes.txt');
+    fuzzyFile.replace_contents('fuzzy', null, false, Gio.FileCreateFlags.NONE, null);
+
+    const betterRanked = tmpDir.get_child('m_i_n-report.txt');
+    betterRanked.replace_contents('rank', null, false, Gio.FileCreateFlags.NONE, null);
+
+    try {
+        const provider = new FileSearchProvider({});
+        provider._scanner = new FileScanner(tmpBase);
+
+        const suggestions = await provider.getSuggestions('min', 5);
+        const labels = suggestions.map(s => s.label);
+
+        if (!labels.includes('my_important_notes.txt')) {
+            throw new Error('Expected fuzzy query "min" to match "my_important_notes.txt" without contiguous substring');
+        }
+
+        if (suggestions[0]?.label !== 'm_i_n-report.txt') {
+            throw new Error(`Expected best-scoring fuzzy match first, got "${suggestions[0]?.label || 'none'}"`);
+        }
+    } finally {
+        const proc = Gio.Subprocess.new(['rm', '-rf', tmpBase], Gio.SubprocessFlags.NONE);
+        proc.wait(null);
+    }
+});
+
 await runner.run();

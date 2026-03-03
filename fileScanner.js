@@ -1,5 +1,6 @@
 import Gio from 'gi://Gio';
 import GLib from 'gi://GLib';
+import { fuzzyScore } from './fuzzyMatch.js';
 
 /**
  * FileScanner performs asynchronous directory traversal using GIO.
@@ -116,12 +117,16 @@ export class FileScanner {
                             await this._enumerateRecursive(child, lowerQuery, results, maxResults, cancellable, currentDepth + 1, maxDepth, state, maxDirs);
                         }
                     } else if (type === Gio.FileType.REGULAR) {
-                        if (name.toLowerCase().includes(lowerQuery)) {
+                        const lowerName = name.toLowerCase();
+                        const score = fuzzyScore(lowerQuery, lowerName, true);
+
+                        if (score > 0) {
                             results.push({
                                 name: name,
                                 path: child.get_path(),
                                 uri: child.get_uri(),
-                                icon: info.get_icon()
+                                icon: info.get_icon(),
+                                score
                             });
                         }
                     }
