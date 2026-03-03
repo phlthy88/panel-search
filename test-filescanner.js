@@ -137,5 +137,49 @@ runner.add('FileScanner should respect maxDirs limit', async () => {
     }
 });
 
+runner.add('FileScanner should continue scanning sibling branches when one directory fails', async () => {
+    const tmpBase = `/tmp/panel-search-branch-failure-test-${Math.floor(Math.random() * 1000000)}`;
+    const tmpDir = Gio.File.new_for_path(tmpBase);
+    tmpDir.make_directory_with_parents(null);
+
+    const goodDir = tmpDir.get_child('good');
+    goodDir.make_directory(null);
+    const goodFile = goodDir.get_child('match-good.txt');
+    goodFile.replace_contents('good', null, false, Gio.FileCreateFlags.NONE, null);
+
+    const failingDir = tmpDir.get_child('failing');
+    failingDir.make_directory(null);
+    const failingFile = failingDir.get_child('match-failing.txt');
+    failingFile.replace_contents('bad', null, false, Gio.FileCreateFlags.NONE, null);
+
+    try {
+        const scanner = new FileScanner(tmpBase);
+        const originalEnumerateRecursive = scanner._enumerateRecursive.bind(scanner);
+
+        scanner._enumerateRecursive = async function (directory, ...args) {
+            if (directory.get_basename() === 'failing') {
+                const proc = Gio.Subprocess.new(['rm', '-rf', directory.get_path()], Gio.SubprocessFlags.NONE);
+                proc.wait(null);
+            }
+
+            return originalEnumerateRecursive(directory, ...args);
+        };
+
+        const results = await scanner.scan('match');
+        const names = results.map(r => r.name);
+
+        if (!names.includes('match-good.txt')) {
+            throw new Error('Expected to find match-good.txt from sibling branch');
+        }
+
+        if (names.includes('match-failing.txt')) {
+            throw new Error('Did not expect results from removed failing branch');
+        }
+    } finally {
+        const proc = Gio.Subprocess.new(['rm', '-rf', tmpBase], Gio.SubprocessFlags.NONE);
+        proc.wait(null);
+    }
+});
+
 await runner.run();
 console.log('All tests finished.');
