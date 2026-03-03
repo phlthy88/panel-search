@@ -156,6 +156,41 @@ export default class PanelSearchPreferences extends ExtensionPreferences {
         );
         providersGroup.add(fileMinCharsRow);
 
+
+        const fileMaxDepthRow = new Adw.SpinRow({
+            title: 'File Scan Depth',
+            subtitle: 'Maximum folder depth scanned per query (1-6)',
+            adjustment: new Gtk.Adjustment({
+                lower: 1,
+                upper: 6,
+                step_increment: 1
+            })
+        });
+        settings.bind(
+            'file-search-max-depth',
+            fileMaxDepthRow,
+            'value',
+            Gio.SettingsBindFlags.DEFAULT
+        );
+        providersGroup.add(fileMaxDepthRow);
+
+        const fileMaxDirectoriesRow = new Adw.SpinRow({
+            title: 'File Directory Scan Budget',
+            subtitle: 'Maximum directories scanned per query (10-500)',
+            adjustment: new Gtk.Adjustment({
+                lower: 10,
+                upper: 500,
+                step_increment: 10
+            })
+        });
+        settings.bind(
+            'file-search-max-directories',
+            fileMaxDirectoriesRow,
+            'value',
+            Gio.SettingsBindFlags.DEFAULT
+        );
+        providersGroup.add(fileMaxDirectoriesRow);
+
         const weatherSearchRow = new Adw.SwitchRow({
             title: 'Weather Search',
             subtitle: 'Enable location weather queries (e.g., "weather Boston")'
