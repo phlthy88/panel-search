@@ -1,7 +1,6 @@
 import Gio from 'gi://Gio';
 import GLib from 'gi://GLib';
 import { FileScanner } from './fileScanner.js';
-import { fuzzyScore } from './fuzzyMatch.js';
 
 /**
  * FileSearchProvider manages file discovery and ranking.
@@ -52,11 +51,7 @@ export class FileSearchProvider {
         );
         if (cancellable?.is_cancelled()) return [];
 
-        const lowerQuery = query.toLowerCase();
-        const ranked = rawFiles.map(file => {
-            const score = fuzzyScore(lowerQuery, file.name.toLowerCase(), true);
-            return { ...file, score };
-        })
+        const ranked = rawFiles
         .filter(f => f.score > 0)
         .sort((a, b) => b.score - a.score)
         .slice(0, maxResults);
