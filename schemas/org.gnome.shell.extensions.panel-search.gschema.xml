@@ -45,6 +45,18 @@
       <summary>File search minimum query length</summary>
       <description>Minimum number of typed characters before querying local file suggestions</description>
     </key>
+    <key name="file-search-max-depth" type="i">
+      <default>2</default>
+      <range min="1" max="6"/>
+      <summary>File search scan depth</summary>
+      <description>Maximum folder depth to scan for local file suggestions (1-6)</description>
+    </key>
+    <key name="file-search-max-directories" type="i">
+      <default>50</default>
+      <range min="10" max="500"/>
+      <summary>File search directory budget</summary>
+      <description>Maximum number of directories to scan per query for local file suggestions (10-500)</description>
+    </key>
     <key name="enable-weather-search" type="b">
       <default>true</default>
       <summary>Enable weather search</summary>

@@ -19,6 +19,20 @@ export class FileSearchProvider {
         return Math.max(1, Math.min(20, value));
     }
 
+    _getMaxScanDepth() {
+        const value = this._settings?.get_int('file-search-max-depth');
+        if (!Number.isFinite(value))
+            return 2;
+        return Math.max(1, Math.min(6, value));
+    }
+
+    _getMaxScanDirectories() {
+        const value = this._settings?.get_int('file-search-max-directories');
+        if (!Number.isFinite(value))
+            return 50;
+        return Math.max(10, Math.min(500, value));
+    }
+
     /**
      * Get ranked suggestions for the query.
      * @param {string} query - The search query.
@@ -29,7 +43,13 @@ export class FileSearchProvider {
     async getSuggestions(query, maxResults = 10, cancellable = null) {
         if (!query || query.length < this._getMinQueryLength()) return [];
 
-        const rawFiles = await this._scanner.scan(query, maxResults * 5, cancellable, 2, 50);
+        const rawFiles = await this._scanner.scan(
+            query,
+            maxResults * 5,
+            cancellable,
+            this._getMaxScanDepth(),
+            this._getMaxScanDirectories()
+        );
         if (cancellable?.is_cancelled()) return [];
 
         const lowerQuery = query.toLowerCase();
