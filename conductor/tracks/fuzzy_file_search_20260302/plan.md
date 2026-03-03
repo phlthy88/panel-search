@@ -3,7 +3,7 @@
 ## Phase 1: Foundation & Indexing
 - [x] Task: Research GNOME search provider integration for files
     - [x] Explore GIO vs Tracker for efficient file discovery
-- [x] Task: Implement basic file discovery module
+- [x] Task: Implement basic file discovery module [3da4a01]
     - [x] Write tests for directory scanning logic
     - [x] Implement `FileScanner` class using GIO
 - [ ] Task: Conductor - User Manual Verification 'Phase 1: Foundation & Indexing' (Protocol in workflow.md)
