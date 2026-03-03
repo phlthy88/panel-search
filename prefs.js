@@ -7,10 +7,6 @@ import {ExtensionPreferences} from 'resource:///org/gnome/Shell/Extensions/js/ex
 export default class PanelSearchPreferences extends ExtensionPreferences {
     fillPreferencesWindow(window) {
         const settings = this.getSettings();
-        if (this._clearTimeoutId) {
-            GLib.source_remove(this._clearTimeoutId);
-            this._clearTimeoutId = null;
-        }
         this._clearTimeoutId = null;
 
         window.connect('close-request', () => {
@@ -138,6 +134,12 @@ export default class PanelSearchPreferences extends ExtensionPreferences {
             Gio.SettingsBindFlags.DEFAULT
         );
         providersGroup.add(fileResultsRow);
+        settings.bind(
+            'enable-file-search',
+            fileResultsRow,
+            'sensitive',
+            Gio.SettingsBindFlags.GET
+        );
 
         const fileMinCharsRow = new Adw.SpinRow({
             title: 'File Query Min Length',
@@ -155,6 +157,12 @@ export default class PanelSearchPreferences extends ExtensionPreferences {
             Gio.SettingsBindFlags.DEFAULT
         );
         providersGroup.add(fileMinCharsRow);
+        settings.bind(
+            'enable-file-search',
+            fileMinCharsRow,
+            'sensitive',
+            Gio.SettingsBindFlags.GET
+        );
 
 
         const fileMaxDepthRow = new Adw.SpinRow({
@@ -173,6 +181,12 @@ export default class PanelSearchPreferences extends ExtensionPreferences {
             Gio.SettingsBindFlags.DEFAULT
         );
         providersGroup.add(fileMaxDepthRow);
+        settings.bind(
+            'enable-file-search',
+            fileMaxDepthRow,
+            'sensitive',
+            Gio.SettingsBindFlags.GET
+        );
 
         const fileMaxDirectoriesRow = new Adw.SpinRow({
             title: 'File Directory Scan Budget',
@@ -190,11 +204,17 @@ export default class PanelSearchPreferences extends ExtensionPreferences {
             Gio.SettingsBindFlags.DEFAULT
         );
         providersGroup.add(fileMaxDirectoriesRow);
+        settings.bind(
+            'enable-file-search',
+            fileMaxDirectoriesRow,
+            'sensitive',
+            Gio.SettingsBindFlags.GET
+        );
 
         const fileRootPathRow = new Adw.EntryRow({
             title: 'File Search Root',
+            subtitle: 'Absolute path or path relative to home (blank = home directory)',
             show_apply_button: true,
-            tooltip_text: 'Absolute path or path relative to home (blank = home directory)'
         });
         settings.bind(
             'file-search-root-path',
@@ -203,6 +223,12 @@ export default class PanelSearchPreferences extends ExtensionPreferences {
             Gio.SettingsBindFlags.DEFAULT
         );
         providersGroup.add(fileRootPathRow);
+        settings.bind(
+            'enable-file-search',
+            fileRootPathRow,
+            'sensitive',
+            Gio.SettingsBindFlags.GET
+        );
 
         const weatherSearchRow = new Adw.SwitchRow({
             title: 'Weather Search',
@@ -279,12 +305,6 @@ export default class PanelSearchPreferences extends ExtensionPreferences {
         );
         providersGroup.add(debounceRow);
 
-        const suggestionsSourceRow = new Adw.ActionRow({
-            title: 'Suggestions Source',
-            subtitle: 'Autocomplete suggestions currently use DuckDuckGo regardless of selected search engine'
-        });
-        providersGroup.add(suggestionsSourceRow);
-        
         // Panel position group
         const positionGroup = new Adw.PreferencesGroup({
             title: 'Panel Position',

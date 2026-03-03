@@ -5,6 +5,7 @@ import Gio from 'gi://Gio';
 import GLib from 'gi://GLib';
 import Shell from 'gi://Shell';
 import Soup from 'gi://Soup?version=3.0';
+import * as PanelMenu from 'resource:///org/gnome/shell/ui/panelMenu.js';
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 import * as PopupMenu from 'resource:///org/gnome/shell/ui/popupMenu.js';
 import {Extension} from 'resource:///org/gnome/shell/extensions/extension.js';
@@ -240,9 +241,11 @@ class PanelSearchWidget extends St.BoxLayout {
         this._softwareProxy = null;
         this._softwareProxyInit = null;
         this._resultsMenuActor = null;
+        this._menuManager = null;
         this._softwareUnavailableLogged = false;
         this._lastQuery = '';
         this._menuHovered = false;
+        this._isDestroyed = false;
         this._signals = [];
         this._cacheWarmupId = null;
 
@@ -291,6 +294,8 @@ class PanelSearchWidget extends St.BoxLayout {
         this._resultsMenuActor = this._resultsMenu.actor ?? this._resultsMenu;
         Main.uiGroup.add_child(this._resultsMenuActor);
         this._resultsMenuActor.hide();
+        this._menuManager = new PopupMenu.PopupMenuManager(this);
+        this._menuManager.addMenu(this._resultsMenu);
 
         // Signals
         const text = this._searchEntry.clutter_text;
@@ -562,11 +567,8 @@ class PanelSearchWidget extends St.BoxLayout {
 
     _injectWebSuggestions(query) {
         this._fetchWebSuggestions(query).then(suggestions => {
-            if (!this._searchEntry || this._searchEntry.get_text().trim() !== query || !suggestions?.length)
-                return;
-
             const engine = getSafeSearchEngine(this._settings.get_string('search-engine'));
-            const newSuggestions = suggestions.slice(0, 5).map(phrase => ({
+            const newSuggestions = (suggestions ?? []).slice(0, 5).map(phrase => ({
                 label: phrase,
                 subtitle: getSuggestionSubtitle(),
                 icon: 'edit-find-symbolic',
@@ -580,26 +582,15 @@ class PanelSearchWidget extends St.BoxLayout {
                     this._hideResults();
                 }
             }));
-
-            const changed = JSON.stringify(newSuggestions.map(s => s.label)) !==
-                           JSON.stringify(this._webSuggestions.map(s => s.label));
-
-            if (!changed) return;
-
-            const previousLabel = this._selectedIndex >= 0 && this._selectedIndex < this._menuItems.length
-                ? this._menuItems[this._selectedIndex].label?.get_text?.()
-                : null;
-
-            this._webSuggestions = newSuggestions;
-            this._renderResults(query);
-
-            if (previousLabel) {
-                const idx = this._menuItems.findIndex(i => i.label?.get_text?.() === previousLabel);
-                if (idx !== -1) {
-                    this._selectedIndex = idx;
-                    this._updateSelection(this._menuItems);
+            this._applyAsyncSuggestions(
+                query,
+                newSuggestions,
+                this._webSuggestions,
+                s => s.label,
+                value => {
+                    this._webSuggestions = value;
                 }
-            }
+            );
         }).catch(e => console.error('Web suggestion error:', e));
     }
 
@@ -636,6 +627,13 @@ class PanelSearchWidget extends St.BoxLayout {
                 SOFTWARE_SEARCH_PROVIDER_IFACE,
                 proxyCancellable,
                 (_obj, res) => {
+                    if (this._isDestroyed) {
+                        if (this._softwareProxyCancellable === proxyCancellable)
+                            this._softwareProxyCancellable = null;
+                        resolve(null);
+                        return;
+                    }
+
                     try {
                         this._softwareProxy = Gio.DBusProxy.new_for_bus_finish(res);
                     } catch (e) {
@@ -779,6 +777,8 @@ class PanelSearchWidget extends St.BoxLayout {
         this._activatePackageCancellable = cancellable;
 
         this._ensureSoftwareProxy().then(proxy => {
+            if (this._isDestroyed || !this._searchEntry)
+                return;
             if (!proxy)
                 return;
 
@@ -805,77 +805,44 @@ class PanelSearchWidget extends St.BoxLayout {
 
     _injectPackageSuggestions(query) {
         this._fetchPackageSuggestions(query).then(suggestions => {
-            if (!this._searchEntry || this._searchEntry.get_text().trim() !== query || !suggestions?.length)
-                return;
-
-            const changed = JSON.stringify(suggestions.map(s => s.label)) !==
-                JSON.stringify(this._packageSuggestions.map(s => s.label));
-            if (!changed)
-                return;
-
-            const previousLabel = this._selectedIndex >= 0 && this._selectedIndex < this._menuItems.length
-                ? this._menuItems[this._selectedIndex].label?.get_text?.()
-                : null;
-
-            this._packageSuggestions = suggestions;
-            this._renderResults(query);
-
-            if (previousLabel) {
-                const idx = this._menuItems.findIndex(i => i.label?.get_text?.() === previousLabel);
-                if (idx !== -1) {
-                    this._selectedIndex = idx;
-                    this._updateSelection(this._menuItems);
+            this._applyAsyncSuggestions(
+                query,
+                suggestions ?? [],
+                this._packageSuggestions,
+                s => s.label,
+                value => {
+                    this._packageSuggestions = value;
                 }
-            }
+            );
         }).catch(e => console.error('Panel Search: Package suggestion error:', e));
     }
 
-    _getFileSearchMaxResults() {
+    _getBoundedInt(key, defaultValue, min, max) {
         let value;
         try {
-            value = this._settings.get_int('file-search-max-results');
+            value = this._settings.get_int(key);
         } catch (_e) {
-            return DEFAULT_FILE_SUGGESTIONS_MAX;
+            return defaultValue;
         }
         if (!Number.isFinite(value))
-            return DEFAULT_FILE_SUGGESTIONS_MAX;
-        return Math.max(1, Math.min(15, value));
+            return defaultValue;
+        return Math.max(min, Math.min(max, value));
+    }
+
+    _getFileSearchMaxResults() {
+        return this._getBoundedInt('file-search-max-results', DEFAULT_FILE_SUGGESTIONS_MAX, 1, 15);
     }
 
     _getFileSearchMinQueryLength() {
-        let value;
-        try {
-            value = this._settings.get_int('file-search-min-query-length');
-        } catch (_e) {
-            return DEFAULT_FILE_MIN_QUERY_LENGTH;
-        }
-        if (!Number.isFinite(value))
-            return DEFAULT_FILE_MIN_QUERY_LENGTH;
-        return Math.max(1, Math.min(20, value));
+        return this._getBoundedInt('file-search-min-query-length', DEFAULT_FILE_MIN_QUERY_LENGTH, 1, 20);
     }
 
     _getPackageSearchMaxResults() {
-        let value;
-        try {
-            value = this._settings.get_int('package-search-max-results');
-        } catch (_e) {
-            return DEFAULT_PACKAGE_SUGGESTIONS_MAX;
-        }
-        if (!Number.isFinite(value))
-            return DEFAULT_PACKAGE_SUGGESTIONS_MAX;
-        return Math.max(1, Math.min(10, value));
+        return this._getBoundedInt('package-search-max-results', DEFAULT_PACKAGE_SUGGESTIONS_MAX, 1, 10);
     }
 
     _getSearchDebounceMs() {
-        let value;
-        try {
-            value = this._settings.get_int('search-debounce-ms');
-        } catch (_e) {
-            return DEFAULT_SEARCH_DEBOUNCE_MS;
-        }
-        if (!Number.isFinite(value))
-            return DEFAULT_SEARCH_DEBOUNCE_MS;
-        return Math.max(50, Math.min(500, value));
+        return this._getBoundedInt('search-debounce-ms', DEFAULT_SEARCH_DEBOUNCE_MS, 50, 500);
     }
 
     _extractWeatherLocation(query) {
@@ -984,28 +951,15 @@ class PanelSearchWidget extends St.BoxLayout {
 
     _injectWeatherSuggestion(query) {
         this._fetchWeatherSuggestion(query).then(suggestions => {
-            if (!this._searchEntry || this._searchEntry.get_text().trim() !== query || !suggestions)
-                return;
-
-            const changed = JSON.stringify(suggestions.map(s => `${s.label}:${s.subtitle}`)) !==
-                JSON.stringify(this._weatherSuggestions.map(s => `${s.label}:${s.subtitle}`));
-            if (!changed)
-                return;
-
-            const previousLabel = this._selectedIndex >= 0 && this._selectedIndex < this._menuItems.length
-                ? this._menuItems[this._selectedIndex].label?.get_text?.()
-                : null;
-
-            this._weatherSuggestions = suggestions;
-            this._renderResults(query);
-
-            if (previousLabel) {
-                const idx = this._menuItems.findIndex(i => i.label?.get_text?.() === previousLabel);
-                if (idx !== -1) {
-                    this._selectedIndex = idx;
-                    this._updateSelection(this._menuItems);
+            this._applyAsyncSuggestions(
+                query,
+                suggestions ?? [],
+                this._weatherSuggestions,
+                s => `${s.label}:${s.subtitle}`,
+                value => {
+                    this._weatherSuggestions = value;
                 }
-            }
+            );
         }).catch(e => console.error('Panel Search: Weather suggestion error:', e));
     }
 
@@ -1023,30 +977,16 @@ class PanelSearchWidget extends St.BoxLayout {
             this._getFileSearchMaxResults(),
             cancellable
         ).then(suggestions => {
-            if (!this._searchEntry || this._searchEntry.get_text().trim() !== query || !suggestions)
-                return;
-
             this._fileSearchError = null;
-
-            const changed = JSON.stringify(suggestions.map(s => `${s.label}:${s.subtitle}`)) !==
-                JSON.stringify(this._fileSuggestions.map(s => `${s.label}:${s.subtitle}`));
-            if (!changed)
-                return;
-
-            const previousLabel = this._selectedIndex >= 0 && this._selectedIndex < this._menuItems.length
-                ? this._menuItems[this._selectedIndex].label?.get_text?.()
-                : null;
-
-            this._fileSuggestions = suggestions;
-            this._renderResults(query);
-
-            if (previousLabel) {
-                const idx = this._menuItems.findIndex(i => i.label?.get_text?.() === previousLabel);
-                if (idx !== -1) {
-                    this._selectedIndex = idx;
-                    this._updateSelection(this._menuItems);
+            this._applyAsyncSuggestions(
+                query,
+                suggestions ?? [],
+                this._fileSuggestions,
+                s => `${s.label}:${s.subtitle}`,
+                value => {
+                    this._fileSuggestions = value;
                 }
-            }
+            );
         }).catch(e => {
             if (!e.matches?.(Gio.IOErrorEnum, Gio.IOErrorEnum.CANCELLED)) {
                 console.error('Panel Search: File suggestion error:', e);
@@ -1303,10 +1243,7 @@ class PanelSearchWidget extends St.BoxLayout {
             weather.forEach(row => this._addResult(row.label, row.subtitle, row.action, row.icon));
         }
 
-        const maxPredictions = this._settings.get_int('max-predictions');
-        const safeMaxPredictions = Number.isFinite(maxPredictions)
-            ? Math.max(0, Math.min(5, maxPredictions))
-            : 5;
+        const safeMaxPredictions = this._getBoundedInt('max-predictions', 5, 0, 5);
         const local = this._getLocalSection(query, lowerQuery, usageData, now, safeMaxPredictions);
         if (local.length > 0) {
             if (completions.length > 0 || packages.length > 0 || files.length > 0 || fileSearchError || weather.length > 0)
@@ -1483,9 +1420,14 @@ class PanelSearchWidget extends St.BoxLayout {
     }
 
     destroy() {
+        this._isDestroyed = true;
         this._menuHovered = false;
         this._settingsAppsCache = null;
         this._settingsOnlyCache = null;
+        this._webSuggestions = [];
+        this._packageSuggestions = [];
+        this._fileSuggestions = [];
+        this._weatherSuggestions = [];
 
         if (this._signals) {
             for (const signal of this._signals)
@@ -1549,6 +1491,10 @@ class PanelSearchWidget extends St.BoxLayout {
             this._predictionEngine = null;
         }
 
+        if (this._menuManager) {
+            this._menuManager.destroy();
+            this._menuManager = null;
+        }
         if (this._resultsMenu) {
             this._resultsMenu.destroy();
             this._resultsMenu = null;
@@ -1568,28 +1514,58 @@ class PanelSearchWidget extends St.BoxLayout {
 
         super.destroy();
     }
+
+    _applyAsyncSuggestions(query, suggestions, currentSuggestions, changeKeyFn, updateFn) {
+        if (this._isDestroyed || !this._searchEntry || this._searchEntry.get_text().trim() !== query || !suggestions?.length)
+            return;
+
+        const changed = JSON.stringify(suggestions.map(changeKeyFn)) !==
+            JSON.stringify(currentSuggestions.map(changeKeyFn));
+        if (!changed)
+            return;
+
+        const previousLabel = this._selectedIndex >= 0 && this._selectedIndex < this._menuItems.length
+            ? this._menuItems[this._selectedIndex].label?.get_text?.()
+            : null;
+
+        updateFn(suggestions);
+        this._renderResults(query);
+
+        if (previousLabel) {
+            const idx = this._menuItems.findIndex(item => item.label?.get_text?.() === previousLabel);
+            if (idx !== -1) {
+                this._selectedIndex = idx;
+                this._updateSelection(this._menuItems);
+            }
+        }
+    }
 });
 
 export default class PanelSearchExtension extends Extension {
+    _getStatusAreaRole() {
+        return this.uuid ?? this.metadata?.uuid ?? 'panel-search';
+    }
+
     _repositionWidget() {
-        if (!this._widget || !this._settings)
+        if (!this._widget || !this._button || !this._settings)
             return;
+
+        const role = this._getStatusAreaRole();
+        if (this._buttonAdded) {
+            if (Main.panel?.statusArea?.[role] === this._button)
+                delete Main.panel.statusArea[role];
+            const previousParent = this._button.get_parent();
+            if (previousParent)
+                previousParent.remove_child(this._button);
+            this._buttonAdded = false;
+        }
 
         const boxName = this._settings.get_string('panel-box');
-        const position = this._settings.get_int('panel-position');
-        const container = this._resolvePanelContainer(boxName);
-        if (!container)
-            return;
+        const safeBox = ['left', 'center', 'right'].includes(boxName) ? boxName : 'left';
+        const safePosition = Math.max(0, this._settings.get_int('panel-position'));
 
-        const parent = this._widget.get_parent();
-        if (parent)
-            parent.remove_child(this._widget);
-
-        const safePosition = Math.max(0, position);
-        const childCount = typeof container.get_n_children === 'function' ? container.get_n_children() : safePosition;
-        const clampedIndex = Math.min(safePosition, childCount);
-        container.insert_child_at_index(this._widget, clampedIndex);
-        this._container = container;
+        Main.panel.addToStatusArea(role, this._button, safePosition, safeBox);
+        this._buttonAdded = true;
     }
 
     _disconnectSettingsSignals() {
@@ -1601,22 +1577,6 @@ export default class PanelSearchExtension extends Extension {
         this._settingsSignals = [];
     }
 
-    _resolvePanelContainer(boxName) {
-        const panel = Main.panel;
-        const boxMap = {
-            left: panel?._leftBox,
-            center: panel?._centerBox,
-            right: panel?._rightBox
-        };
-
-        if (Object.hasOwn(boxMap, boxName) && boxMap[boxName])
-            return boxMap[boxName];
-
-        const fallback = boxMap.left ?? boxMap.center ?? boxMap.right ?? null;
-        console.error(`Panel Search: Invalid or unavailable panel box "${boxName}", using fallback.`);
-        return fallback;
-    }
-
     enable() {
         if (this._widget) {
             console.error('Panel Search: enable() called while already enabled; ignoring duplicate call.');
@@ -1626,10 +1586,13 @@ export default class PanelSearchExtension extends Extension {
         try {
             this._settings = this.getSettings();
             this._widget = new PanelSearchWidget(this._settings);
+            this._button = new PanelMenu.Button(0.5, 'Panel Search', true);
+            this._button.add_child(this._widget);
+            this._buttonAdded = false;
             this._settingsSignals = [];
 
             this._repositionWidget();
-            if (!this._container)
+            if (!this._buttonAdded)
                 throw new Error('No panel container available');
 
             this._settingsSignals.push(
@@ -1643,7 +1606,14 @@ export default class PanelSearchExtension extends Extension {
                 this._widget.destroy();
                 this._widget = null;
             }
-            this._container = null;
+            if (this._button) {
+                const role = this._getStatusAreaRole();
+                if (Main.panel?.statusArea?.[role] === this._button)
+                    delete Main.panel.statusArea[role];
+                this._button.destroy();
+                this._button = null;
+            }
+            this._buttonAdded = false;
             this._settings = null;
             throw e;
         }
@@ -1657,8 +1627,15 @@ export default class PanelSearchExtension extends Extension {
             this._widget.destroy();
             this._widget = null;
         }
+        if (this._button) {
+            const role = this._getStatusAreaRole();
+            if (Main.panel?.statusArea?.[role] === this._button)
+                delete Main.panel.statusArea[role];
+            this._button.destroy();
+            this._button = null;
+        }
         this._disconnectSettingsSignals();
-        this._container = null;
+        this._buttonAdded = false;
         this._settings = null;
     }
 }
