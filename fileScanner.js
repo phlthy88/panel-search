@@ -40,76 +40,115 @@ export class FileScanner {
 
         state.dirsScanned++;
 
-        const enumerator = await new Promise((resolve, reject) => {
-            directory.enumerate_children_async(
-                'standard::name,standard::type,standard::icon',
-                Gio.FileQueryInfoFlags.NONE,
-                GLib.PRIORITY_DEFAULT,
-                cancellable,
-                (obj, res) => {
-                    try {
-                        resolve(obj.enumerate_children_finish(res));
-                    } catch (e) {
-                        reject(e);
-                    }
-                }
-            );
-        });
-
-        while (true) {
-            if (cancellable?.is_cancelled()) break;
-            if (results.length >= maxResults) break;
-
-            const infos = await new Promise((resolve, reject) => {
-                enumerator.next_files_async(
-                    10,
+        let enumerator = null;
+        try {
+            enumerator = await new Promise((resolve, reject) => {
+                directory.enumerate_children_async(
+                    'standard::name,standard::type,standard::icon',
+                    Gio.FileQueryInfoFlags.NONE,
                     GLib.PRIORITY_DEFAULT,
                     cancellable,
                     (obj, res) => {
                         try {
-                            resolve(obj.next_files_finish(res));
+                            resolve(obj.enumerate_children_finish(res));
                         } catch (e) {
                             reject(e);
                         }
                     }
                 );
             });
-
-            if (infos.length === 0) break;
-
-            for (const info of infos) {
-                const name = info.get_name();
-                const type = info.get_file_type();
-                const child = directory.get_child(name);
-
-                if (type === Gio.FileType.DIRECTORY) {
-                    // Skip hidden directories like .git
-                    if (!name.startsWith('.')) {
-                        await this._enumerateRecursive(child, lowerQuery, results, maxResults, cancellable, currentDepth + 1, maxDepth, state, maxDirs);
-                    }
-                } else if (type === Gio.FileType.REGULAR) {
-                    if (name.toLowerCase().includes(lowerQuery)) {
-                        results.push({
-                            name: name,
-                            path: child.get_path(),
-                            uri: child.get_uri(),
-                            icon: info.get_icon()
-                        });
-                    }
-                }
-
-                if (results.length >= maxResults) break;
+        } catch (e) {
+            if (e.matches?.(Gio.IOErrorEnum, Gio.IOErrorEnum.CANCELLED)) {
+                throw e;
             }
+
+            const path = directory.get_path() || directory.get_uri();
+            if (e.matches?.(Gio.IOErrorEnum, Gio.IOErrorEnum.NOT_FOUND)) {
+                console.debug(`FileScanner: Skipping missing directory ${path}:`, e.message);
+            } else {
+                console.warn(`FileScanner: Could not enumerate directory ${path}:`, e.message);
+            }
+
+            return;
         }
 
-        await new Promise((resolve, reject) => {
-            enumerator.close_async(GLib.PRIORITY_DEFAULT, cancellable, (obj, res) => {
+        try {
+            while (true) {
+                if (cancellable?.is_cancelled()) break;
+                if (results.length >= maxResults) break;
+
+                let infos;
                 try {
-                    resolve(obj.close_finish(res));
+                    infos = await new Promise((resolve, reject) => {
+                        enumerator.next_files_async(
+                            10,
+                            GLib.PRIORITY_DEFAULT,
+                            cancellable,
+                            (obj, res) => {
+                                try {
+                                    resolve(obj.next_files_finish(res));
+                                } catch (e) {
+                                    reject(e);
+                                }
+                            }
+                        );
+                    });
                 } catch (e) {
-                    reject(e);
+                    if (e.matches?.(Gio.IOErrorEnum, Gio.IOErrorEnum.CANCELLED)) {
+                        throw e;
+                    }
+
+                    const path = directory.get_path() || directory.get_uri();
+                    console.warn(`FileScanner: Could not continue enumerating ${path}:`, e.message);
+                    break;
                 }
-            });
-        });
+
+                if (infos.length === 0) break;
+
+                for (const info of infos) {
+                    const name = info.get_name();
+                    const type = info.get_file_type();
+                    const child = directory.get_child(name);
+
+                    if (type === Gio.FileType.DIRECTORY) {
+                        // Skip hidden directories like .git
+                        if (!name.startsWith('.')) {
+                            await this._enumerateRecursive(child, lowerQuery, results, maxResults, cancellable, currentDepth + 1, maxDepth, state, maxDirs);
+                        }
+                    } else if (type === Gio.FileType.REGULAR) {
+                        if (name.toLowerCase().includes(lowerQuery)) {
+                            results.push({
+                                name: name,
+                                path: child.get_path(),
+                                uri: child.get_uri(),
+                                icon: info.get_icon()
+                            });
+                        }
+                    }
+
+                    if (results.length >= maxResults) break;
+                }
+            }
+        } finally {
+            if (enumerator) {
+                await new Promise((resolve, reject) => {
+                    enumerator.close_async(GLib.PRIORITY_DEFAULT, cancellable, (obj, res) => {
+                        try {
+                            resolve(obj.close_finish(res));
+                        } catch (e) {
+                            if (e.matches?.(Gio.IOErrorEnum, Gio.IOErrorEnum.CANCELLED)) {
+                                reject(e);
+                                return;
+                            }
+
+                            const path = directory.get_path() || directory.get_uri();
+                            console.debug(`FileScanner: Failed to close enumerator for ${path}:`, e.message);
+                            resolve(false);
+                        }
+                    });
+                }
+                );
+            }
+        }
     }
 }
