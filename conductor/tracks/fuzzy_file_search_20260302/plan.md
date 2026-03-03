@@ -9,12 +9,12 @@
 - [x] Task: Conductor - User Manual Verification 'Phase 1: Foundation & Indexing' (Protocol in workflow.md)
 
 ## Phase 2: Search Logic & Integration
-- [ ] Task: Implement fuzzy matching for file results
-    - [ ] Write tests for fuzzy matching algorithm
-    - [ ] Integrate fuzzy matching into the search provider
-- [ ] Task: Register File Search Provider with the omnibox
-    - [ ] Write tests for provider registration
-    - [ ] Implement the `FileSearchProvider` class
+- [x] Task: Implement fuzzy matching for file results
+    - [x] Write tests for fuzzy matching algorithm
+    - [x] Integrate fuzzy matching into the search provider
+- [x] Task: Register File Search Provider with the omnibox
+    - [x] Write tests for provider registration
+    - [x] Implement the `FileSearchProvider` class
 - [ ] Task: Conductor - User Manual Verification 'Phase 2: Search Logic & Integration' (Protocol in workflow.md)
 
 ## Phase 3: UI & Refinement
