@@ -1,11 +1,11 @@
 # Implementation Plan: Fuzzy File Search Integration
 
 ## Phase 1: Foundation & Indexing
-- [ ] Task: Research GNOME search provider integration for files
-    - [ ] Explore GIO vs Tracker for efficient file discovery
-- [ ] Task: Implement basic file discovery module
-    - [ ] Write tests for directory scanning logic
-    - [ ] Implement `FileScanner` class using GIO
+- [x] Task: Research GNOME search provider integration for files
+    - [x] Explore GIO vs Tracker for efficient file discovery
+- [x] Task: Implement basic file discovery module
+    - [x] Write tests for directory scanning logic
+    - [x] Implement `FileScanner` class using GIO
 - [ ] Task: Conductor - User Manual Verification 'Phase 1: Foundation & Indexing' (Protocol in workflow.md)
 
 ## Phase 2: Search Logic & Integration
