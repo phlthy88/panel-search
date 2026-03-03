@@ -8,14 +8,14 @@
     - [x] Implement `FileScanner` class using GIO
 - [x] Task: Conductor - User Manual Verification 'Phase 1: Foundation & Indexing' (Protocol in workflow.md)
 
-## Phase 2: Search Logic & Integration
+## Phase 2: Search Logic & Integration [checkpoint: ed35258]
 - [x] Task: Implement fuzzy matching for file results [dd10917]
     - [x] Write tests for fuzzy matching algorithm
     - [x] Integrate fuzzy matching into the search provider
 - [x] Task: Register File Search Provider with the omnibox [dd10917]
     - [x] Write tests for provider registration
     - [x] Implement the `FileSearchProvider` class
-- [ ] Task: Conductor - User Manual Verification 'Phase 2: Search Logic & Integration' (Protocol in workflow.md)
+- [x] Task: Conductor - User Manual Verification 'Phase 2: Search Logic & Integration' (Protocol in workflow.md)
 
 ## Phase 3: UI & Refinement
 - [ ] Task: Enhance UI for file search results
