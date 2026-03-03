@@ -1,52 +1,46 @@
 .panel-search-box {
-    padding: 0 8px;
-}
-
-.panel-search-clear-button {
-    padding: 2px;
-    border-radius: 3px;
-    background-color: transparent;
-    border: none;
-    color: rgba(255, 255, 255, 0.6);
-}
-
-.panel-search-clear-button:hover {
-    background-color: rgba(255, 255, 255, 0.15);
-    color: #ffffff;
-}
-
-.panel-search-clear-button:active {
-    background-color: rgba(255, 255, 255, 0.2);
+    padding: 0 6px;
 }
 
 .panel-search-entry {
-    min-width: 250px;
-    max-width: 350px;
-    padding: 4px 10px;
-    border-radius: 4px;
-    background-color: rgba(255, 255, 255, 0.08);
-    color: #ffffff;
-    font-size: 10pt;
-    border: 1px solid rgba(255, 255, 255, 0.1);
+    min-width: 220px;
+    max-width: 360px;
+    padding: 2px 8px;
+    border-radius: 6px;
 }
 
-.panel-search-entry:focus {
+.panel-search-entry-light {
+    background-color: rgba(0, 0, 0, 0.06);
+    color: rgba(0, 0, 0, 0.9);
+    border: 1px solid rgba(0, 0, 0, 0.18);
+}
+
+.panel-search-entry-dark {
+    background-color: rgba(255, 255, 255, 0.08);
+    color: rgba(255, 255, 255, 0.95);
+    border: 1px solid rgba(255, 255, 255, 0.16);
+}
+
+.panel-search-entry-light:focus {
+    background-color: rgba(0, 0, 0, 0.1);
+    border: 1px solid rgba(28, 113, 216, 0.8);
+}
+
+.panel-search-entry-dark:focus {
     background-color: rgba(255, 255, 255, 0.12);
-    border: 1px solid rgb(193, 92, 40);
+    border: 1px solid rgba(120, 174, 237, 0.9);
+}
+
+.panel-search-clear-icon {
+    opacity: 0.8;
 }
 
 .panel-search-results {
-    min-width: 300px;
-    max-width: 400px;
+    min-width: 280px;
+    max-width: 420px;
 }
 
 .popup-subtitle-menu-item {
-    font-size: 9pt;
-    color: rgba(255, 255, 255, 0.55);
+    opacity: 0.8;
     padding-left: 8px;
-}
-
-.popup-prediction-label {
-    font-style: italic;
-    color: rgba(100, 150, 255, 0.7);
 }

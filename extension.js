@@ -21,10 +21,57 @@ const MAX_QUERY_LENGTH = 500;
 const RECENCY_WEIGHT = 0.3;
 const FREQUENCY_WEIGHT = 0.7;
 const RECENCY_HALF_LIFE_DAYS = 7;
-const SEARCH_DEBOUNCE_MS = 150;
+const DEFAULT_SEARCH_DEBOUNCE_MS = 150;
+const DEFAULT_PACKAGE_SUGGESTIONS_MAX = 4;
+const PACKAGE_MIN_QUERY_LENGTH = 2;
+const DEFAULT_FILE_SUGGESTIONS_MAX = 6;
+const DEFAULT_FILE_MIN_QUERY_LENGTH = 3;
+const WEATHER_SUGGESTIONS_MAX = 1;
+const SOFTWARE_SEARCH_PROVIDER_BUS = 'org.gnome.Software';
+const SOFTWARE_SEARCH_PROVIDER_PATH = '/org/gnome/Software/SearchProvider';
+const SOFTWARE_SEARCH_PROVIDER_IFACE = 'org.gnome.Shell.SearchProvider2';
+const WEATHER_CODE_MAP = {
+    0: 'Clear sky',
+    1: 'Mainly clear',
+    2: 'Partly cloudy',
+    3: 'Overcast',
+    45: 'Fog',
+    48: 'Depositing rime fog',
+    51: 'Light drizzle',
+    53: 'Moderate drizzle',
+    55: 'Dense drizzle',
+    56: 'Light freezing drizzle',
+    57: 'Dense freezing drizzle',
+    61: 'Slight rain',
+    63: 'Moderate rain',
+    65: 'Heavy rain',
+    66: 'Light freezing rain',
+    67: 'Heavy freezing rain',
+    71: 'Slight snow fall',
+    73: 'Moderate snow fall',
+    75: 'Heavy snow fall',
+    77: 'Snow grains',
+    80: 'Slight rain showers',
+    81: 'Moderate rain showers',
+    82: 'Violent rain showers',
+    85: 'Slight snow showers',
+    86: 'Heavy snow showers',
+    95: 'Thunderstorm',
+    96: 'Thunderstorm with slight hail',
+    99: 'Thunderstorm with heavy hail'
+};
 
 function getSafeSearchEngine(rawEngine) {
     return Object.hasOwn(SEARCH_ENGINES, rawEngine) ? rawEngine : 'google';
+}
+
+function getSafeWeatherUnits(rawUnits) {
+    return rawUnits === 'celsius' ? 'celsius' : 'fahrenheit';
+}
+
+function getSuggestionSubtitle() {
+    // Suggestion phrases are intentionally sourced from DuckDuckGo AC for broad availability.
+    return 'Suggestion (DuckDuckGo)';
 }
 
 /**
@@ -142,6 +189,10 @@ class PredictionEngine {
         return this._usageData;
     }
 
+    reloadUsageData() {
+        this._usageData = this._loadUsageData();
+    }
+
     destroy() {
         this._usageData = null;
         this._settings = null;
@@ -159,6 +210,7 @@ class PanelSearchWidget extends St.BoxLayout {
         });
 
         this._settings = settings;
+        this._interfaceSettings = new Gio.Settings({schema_id: 'org.gnome.desktop.interface'});
         this._appSystem = Shell.AppSystem.get_default();
         this._settingsAppsCache = null;
         this._settingsOnlyCache = null;
@@ -168,9 +220,23 @@ class PanelSearchWidget extends St.BoxLayout {
         this._searchDebounceId = null;
         this._menuItems = [];
         this._suggestRequestId = 0;
+        this._packageRequestId = 0;
+        this._weatherRequestId = 0;
         this._webSuggestions = [];
+        this._packageSuggestions = [];
+        this._fileSuggestions = [];
+        this._weatherSuggestions = [];
         this._soupSession = new Soup.Session();
         this._suggestCancellable = null;
+        this._packageSuggestCancellable = null;
+        this._fileSuggestCancellable = null;
+        this._weatherSuggestCancellable = null;
+        this._softwareProxy = null;
+        this._softwareProxyInit = null;
+        this._softwareUnavailableLogged = false;
+        this._trackerUnavailableLogged = false;
+        this._trackerFileSearchDisabled = false;
+        this._fileRequestId = 0;
         this._lastQuery = '';
         this._menuHovered = false;
         this._signals = [];
@@ -192,6 +258,7 @@ class PanelSearchWidget extends St.BoxLayout {
             hint_text: 'Search...',
             track_hover: true
         });
+        this._applyThemeClass();
 
         this._clearIcon = new St.Icon({
             icon_name: 'edit-clear-symbolic',
@@ -225,6 +292,24 @@ class PanelSearchWidget extends St.BoxLayout {
             { obj: text, id: text.connect('activate', () => this._onSearchActivate()) },
             { obj: text, id: text.connect('key-focus-in', () => this._showResults()) },
             { obj: text, id: text.connect('key-press-event', (_actor, event) => this._onKeyPress(event)) },
+            { obj: this._interfaceSettings, id: this._interfaceSettings.connect('changed::color-scheme', () => this._applyThemeClass()) },
+            { obj: this._settings, id: this._settings.connect('changed::usage-history', () => {
+                if (this._predictionEngine)
+                    this._predictionEngine.reloadUsageData();
+            }) },
+            { obj: this._settings, id: this._settings.connect('changed::enable-file-search', () => {
+                const enabled = this._settings?.get_boolean('enable-file-search');
+                if (enabled) {
+                    this._trackerFileSearchDisabled = false;
+                    this._trackerUnavailableLogged = false;
+                } else {
+                    this._fileSuggestions = [];
+                }
+            }) },
+            { obj: this._settings, id: this._settings.connect('changed::enable-package-search', () => {
+                if (!this._settings?.get_boolean('enable-package-search'))
+                    this._packageSuggestions = [];
+            }) },
             { obj: this._resultsMenu.actor, id: this._resultsMenu.actor.connect('enter-event', () => { this._menuHovered = true; }) },
             { obj: this._resultsMenu.actor, id: this._resultsMenu.actor.connect('leave-event', () => { this._menuHovered = false; }) },
             { obj: text, id: text.connect('key-focus-out', () => {
@@ -250,10 +335,25 @@ class PanelSearchWidget extends St.BoxLayout {
             this._resultsMenu.open(true);
     }
 
+    _applyThemeClass() {
+        if (!this._searchEntry || !this._interfaceSettings)
+            return;
+
+        const scheme = this._interfaceSettings.get_string('color-scheme');
+        const darkMode = scheme === 'prefer-dark';
+
+        this._searchEntry.remove_style_class_name('panel-search-entry-light');
+        this._searchEntry.remove_style_class_name('panel-search-entry-dark');
+        this._searchEntry.add_style_class_name(darkMode ? 'panel-search-entry-dark' : 'panel-search-entry-light');
+    }
+
     _hideResults() {
         this._resultsMenu.close(true);
         this._searchEntry.set_text('');
         this._selectedIndex = -1;
+        try {
+            global.stage?.set_key_focus?.(null);
+        } catch (_e) {}
     }
 
     // ─── Debounced search ────────────────────────────────────────────────────
@@ -272,7 +372,7 @@ class PanelSearchWidget extends St.BoxLayout {
             return;
         }
 
-        this._searchDebounceId = GLib.timeout_add(GLib.PRIORITY_DEFAULT, SEARCH_DEBOUNCE_MS, () => {
+        this._searchDebounceId = GLib.timeout_add(GLib.PRIORITY_DEFAULT, this._getSearchDebounceMs(), () => {
             this._searchDebounceId = null;
             this._onSearchChanged();
             return GLib.SOURCE_REMOVE;
@@ -398,7 +498,7 @@ class PanelSearchWidget extends St.BoxLayout {
             const engine = getSafeSearchEngine(this._settings.get_string('search-engine'));
             const newSuggestions = suggestions.slice(0, 5).map(phrase => ({
                 label: phrase,
-                subtitle: 'Suggestion',
+                subtitle: getSuggestionSubtitle(),
                 icon: 'edit-find-symbolic',
                 action: () => {
                     this._runActionSafely(() => {
@@ -433,6 +533,587 @@ class PanelSearchWidget extends St.BoxLayout {
         }).catch(e => console.error('Web suggestion error:', e));
     }
 
+    _getActivationTimestamp() {
+        try {
+            if (global?.get_current_time)
+                return global.get_current_time();
+        } catch (_e) {}
+
+        try {
+            return Clutter.get_current_event_time();
+        } catch (_e) {
+            return 0;
+        }
+    }
+
+    async _ensureSoftwareProxy() {
+        if (this._softwareProxy)
+            return this._softwareProxy;
+
+        if (this._softwareProxyInit)
+            return this._softwareProxyInit;
+
+        this._softwareProxyInit = new Promise(resolve => {
+            Gio.DBusProxy.new_for_bus(
+                Gio.BusType.SESSION,
+                Gio.DBusProxyFlags.NONE,
+                null,
+                SOFTWARE_SEARCH_PROVIDER_BUS,
+                SOFTWARE_SEARCH_PROVIDER_PATH,
+                SOFTWARE_SEARCH_PROVIDER_IFACE,
+                null,
+                (_obj, res) => {
+                    try {
+                        this._softwareProxy = Gio.DBusProxy.new_for_bus_finish(res);
+                    } catch (e) {
+                        if (!this._softwareUnavailableLogged) {
+                            console.error('Panel Search: GNOME Software search provider unavailable:', e);
+                            this._softwareUnavailableLogged = true;
+                        }
+                        this._softwareProxy = null;
+                    } finally {
+                        resolve(this._softwareProxy);
+                    }
+                }
+            );
+        });
+
+        try {
+            return await this._softwareProxyInit;
+        } finally {
+            this._softwareProxyInit = null;
+        }
+    }
+
+    _callProxy(proxy, method, parameters, cancellable) {
+        return new Promise((resolve, reject) => {
+            proxy.call(
+                method,
+                parameters,
+                Gio.DBusCallFlags.NONE,
+                -1,
+                cancellable,
+                (_obj, res) => {
+                    try {
+                        resolve(proxy.call_finish(res));
+                    } catch (e) {
+                        reject(e);
+                    }
+                }
+            );
+        });
+    }
+
+    _normalizeMetaValue(value) {
+        return value?.deepUnpack ? value.deepUnpack() : value;
+    }
+
+    _normalizeResultMeta(meta) {
+        if (!meta || typeof meta !== 'object')
+            return {};
+
+        const normalized = {};
+        for (const [key, value] of Object.entries(meta))
+            normalized[key] = this._normalizeMetaValue(value);
+        return normalized;
+    }
+
+    async _fetchPackageSuggestions(query) {
+        if (query.length < PACKAGE_MIN_QUERY_LENGTH)
+            return [];
+        if (!this._settings.get_boolean('enable-package-search'))
+            return [];
+
+        const maxResults = this._getPackageSearchMaxResults();
+        const requestId = ++this._packageRequestId;
+        if (this._packageSuggestCancellable) {
+            this._packageSuggestCancellable.cancel();
+            this._packageSuggestCancellable = null;
+        }
+
+        const cancellable = new Gio.Cancellable();
+        this._packageSuggestCancellable = cancellable;
+
+        try {
+            const proxy = await this._ensureSoftwareProxy();
+            if (!proxy)
+                return [];
+
+            const initialReply = await this._callProxy(
+                proxy,
+                'GetInitialResultSet',
+                new GLib.Variant('(as)', [[query]]),
+                cancellable
+            );
+            const initialResults = initialReply.deepUnpack()?.[0] ?? [];
+            if (!Array.isArray(initialResults) || initialResults.length === 0)
+                return [];
+
+            const resultIds = initialResults.slice(0, maxResults);
+            const metasReply = await this._callProxy(
+                proxy,
+                'GetResultMetas',
+                new GLib.Variant('(as)', [resultIds]),
+                cancellable
+            );
+            const metas = metasReply.deepUnpack()?.[0] ?? [];
+
+            if (requestId !== this._packageRequestId)
+                return [];
+
+            const suggestions = resultIds.map((resultId, index) => {
+                const meta = this._normalizeResultMeta(metas[index] ?? {});
+                const name = typeof meta.name === 'string' && meta.name.length > 0
+                    ? meta.name
+                    : resultId;
+                const description = typeof meta.description === 'string' && meta.description.length > 0
+                    ? meta.description
+                    : 'Available in Software';
+
+                return {
+                    label: name,
+                    subtitle: description,
+                    icon: 'system-software-install-symbolic',
+                    action: () => {
+                        this._runActionSafely(() => {
+                            this._activatePackageSuggestion(resultId, query);
+                        }, `activating package suggestion ${resultId}`);
+                        this._hideResults();
+                    }
+                };
+            });
+
+            return suggestions.slice(0, maxResults);
+        } catch (e) {
+            if (e.matches?.(Gio.IOErrorEnum, Gio.IOErrorEnum.CANCELLED))
+                return [];
+
+            console.error('Panel Search: Failed to fetch package suggestions:', e);
+            return [];
+        } finally {
+            if (this._packageSuggestCancellable === cancellable)
+                this._packageSuggestCancellable = null;
+        }
+    }
+
+    _activatePackageSuggestion(resultId, query) {
+        this._ensureSoftwareProxy().then(proxy => {
+            if (!proxy)
+                return;
+
+            proxy.call(
+                'ActivateResult',
+                new GLib.Variant('(sasu)', [resultId, [query], this._getActivationTimestamp()]),
+                Gio.DBusCallFlags.NONE,
+                -1,
+                null,
+                (_obj, res) => {
+                    try {
+                        proxy.call_finish(res);
+                    } catch (e) {
+                        console.error(`Panel Search: Failed to activate package suggestion ${resultId}:`, e);
+                    }
+                }
+            );
+        }).catch(e => console.error('Panel Search: Software proxy activation failure:', e));
+    }
+
+    _injectPackageSuggestions(query) {
+        this._fetchPackageSuggestions(query).then(suggestions => {
+            if (!this._searchEntry || this._searchEntry.get_text().trim() !== query || !suggestions?.length)
+                return;
+
+            const changed = JSON.stringify(suggestions.map(s => s.label)) !==
+                JSON.stringify(this._packageSuggestions.map(s => s.label));
+            if (!changed)
+                return;
+
+            const previousLabel = this._selectedIndex >= 0 && this._selectedIndex < this._menuItems.length
+                ? this._menuItems[this._selectedIndex].label?.get_text?.()
+                : null;
+
+            this._packageSuggestions = suggestions;
+            this._renderResults(query);
+
+            if (previousLabel) {
+                const idx = this._menuItems.findIndex(i => i.label?.get_text?.() === previousLabel);
+                if (idx !== -1) {
+                    this._selectedIndex = idx;
+                    this._updateSelection(this._menuItems);
+                }
+            }
+        }).catch(e => console.error('Panel Search: Package suggestion error:', e));
+    }
+
+    _getFileSearchMaxResults() {
+        const value = this._settings.get_int('file-search-max-results');
+        if (!Number.isFinite(value))
+            return DEFAULT_FILE_SUGGESTIONS_MAX;
+        return Math.max(1, Math.min(15, value));
+    }
+
+    _getFileSearchMinQueryLength() {
+        const value = this._settings.get_int('file-search-min-query-length');
+        if (!Number.isFinite(value))
+            return DEFAULT_FILE_MIN_QUERY_LENGTH;
+        return Math.max(1, Math.min(20, value));
+    }
+
+    _getPackageSearchMaxResults() {
+        const value = this._settings.get_int('package-search-max-results');
+        if (!Number.isFinite(value))
+            return DEFAULT_PACKAGE_SUGGESTIONS_MAX;
+        return Math.max(1, Math.min(10, value));
+    }
+
+    _getSearchDebounceMs() {
+        const value = this._settings.get_int('search-debounce-ms');
+        if (!Number.isFinite(value))
+            return DEFAULT_SEARCH_DEBOUNCE_MS;
+        return Math.max(50, Math.min(500, value));
+    }
+
+    _extractWeatherLocation(query) {
+        const match = query.match(/^(weather|wx|temp|temperature)\s*(?:in|for)?\s+(.+)$/i);
+        if (!match || typeof match[2] !== 'string')
+            return null;
+
+        const location = match[2].trim();
+        return location.length > 0 ? location : null;
+    }
+
+    _weatherDescription(code) {
+        return Object.hasOwn(WEATHER_CODE_MAP, code) ? WEATHER_CODE_MAP[code] : 'Weather unavailable';
+    }
+
+    async _fetchJson(url, cancellable) {
+        const message = Soup.Message.new('GET', url);
+        message.request_headers.append('User-Agent', 'panel-search-extension');
+
+        const bytes = await new Promise((resolve, reject) => {
+            this._soupSession.send_and_read_async(
+                message,
+                GLib.PRIORITY_DEFAULT,
+                cancellable,
+                (session, res) => {
+                    try {
+                        resolve(session.send_and_read_finish(res));
+                    } catch (e) {
+                        reject(e);
+                    }
+                }
+            );
+        });
+
+        const response = new TextDecoder().decode(bytes.get_data());
+        return JSON.parse(response);
+    }
+
+    async _fetchWeatherSuggestion(query) {
+        const location = this._extractWeatherLocation(query);
+        if (!location)
+            return [];
+
+        const requestId = ++this._weatherRequestId;
+        if (this._weatherSuggestCancellable) {
+            this._weatherSuggestCancellable.cancel();
+            this._weatherSuggestCancellable = null;
+        }
+
+        const cancellable = new Gio.Cancellable();
+        this._weatherSuggestCancellable = cancellable;
+
+        try {
+            const units = getSafeWeatherUnits(this._settings.get_string('weather-units'));
+            const geocodeUrl = `https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(location)}&count=1&language=en&format=json`;
+            const geocode = await this._fetchJson(geocodeUrl, cancellable);
+            const match = geocode?.results?.[0];
+            if (!match || requestId !== this._weatherRequestId)
+                return [];
+
+            const latitude = match.latitude;
+            const longitude = match.longitude;
+            if (typeof latitude !== 'number' || typeof longitude !== 'number')
+                return [];
+
+            const weatherUrl = `https://api.open-meteo.com/v1/forecast?latitude=${latitude}&longitude=${longitude}&current=temperature_2m,weather_code&temperature_unit=${units}&timezone=auto`;
+            const weather = await this._fetchJson(weatherUrl, cancellable);
+            if (requestId !== this._weatherRequestId)
+                return [];
+
+            const current = weather?.current ?? weather?.current_weather ?? null;
+            if (!current)
+                return [];
+
+            const temperature = current.temperature_2m ?? current.temperature;
+            const weatherCode = current.weather_code ?? current.weathercode;
+            if (typeof temperature !== 'number')
+                return [];
+
+            const unitSymbol = units === 'celsius' ? 'C' : 'F';
+            const placeBits = [match.name, match.admin1, match.country].filter(Boolean);
+            const placeLabel = placeBits.join(', ');
+            const description = this._weatherDescription(Number(weatherCode));
+
+            return [{
+                label: `Weather in ${placeLabel || location}`,
+                subtitle: `${temperature.toFixed(1)}°${unitSymbol} - ${description}`,
+                icon: 'weather-clear-symbolic',
+                action: () => {
+                    const weatherPage = `https://open-meteo.com/en/docs?latitude=${latitude}&longitude=${longitude}`;
+                    this._runActionSafely(() => Gio.AppInfo.launch_default_for_uri(weatherPage, null), 'launching weather details URI');
+                    this._hideResults();
+                }
+            }];
+        } catch (e) {
+            if (e.matches?.(Gio.IOErrorEnum, Gio.IOErrorEnum.CANCELLED))
+                return [];
+
+            console.error('Panel Search: Failed to fetch weather suggestion:', e);
+            return [];
+        } finally {
+            if (this._weatherSuggestCancellable === cancellable)
+                this._weatherSuggestCancellable = null;
+        }
+    }
+
+    _injectWeatherSuggestion(query) {
+        this._fetchWeatherSuggestion(query).then(suggestions => {
+            if (!this._searchEntry || this._searchEntry.get_text().trim() !== query || !suggestions)
+                return;
+
+            const changed = JSON.stringify(suggestions.map(s => `${s.label}:${s.subtitle}`)) !==
+                JSON.stringify(this._weatherSuggestions.map(s => `${s.label}:${s.subtitle}`));
+            if (!changed)
+                return;
+
+            const previousLabel = this._selectedIndex >= 0 && this._selectedIndex < this._menuItems.length
+                ? this._menuItems[this._selectedIndex].label?.get_text?.()
+                : null;
+
+            this._weatherSuggestions = suggestions;
+            this._renderResults(query);
+
+            if (previousLabel) {
+                const idx = this._menuItems.findIndex(i => i.label?.get_text?.() === previousLabel);
+                if (idx !== -1) {
+                    this._selectedIndex = idx;
+                    this._updateSelection(this._menuItems);
+                }
+            }
+        }).catch(e => console.error('Panel Search: Weather suggestion error:', e));
+    }
+
+    async _runSubprocess(argv, cancellable) {
+        const proc = Gio.Subprocess.new(
+            argv,
+            Gio.SubprocessFlags.STDOUT_PIPE | Gio.SubprocessFlags.STDERR_PIPE
+        );
+
+        return await new Promise((resolve, reject) => {
+            proc.communicate_utf8_async(null, cancellable, (_obj, res) => {
+                try {
+                    const [ok, stdout, stderr] = proc.communicate_utf8_finish(res);
+                    if (!ok || proc.get_exit_status() !== 0) {
+                        reject(new Error(stderr?.trim() || `command failed: ${argv.join(' ')}`));
+                        return;
+                    }
+                    resolve(stdout || '');
+                } catch (e) {
+                    reject(e);
+                }
+            });
+        });
+    }
+
+    _extractPathFromTrackerLine(line) {
+        let value = line.trim();
+        if (!value)
+            return null;
+
+        // tracker3 search output can include numeric prefixes like "1. /path"
+        value = value.replace(/^\d+\.\s*/, '').trim();
+        if (!value)
+            return null;
+
+        if (value.startsWith('file://')) {
+            try {
+                return Gio.File.new_for_uri(value).get_path();
+            } catch (_e) {
+                return null;
+            }
+        }
+
+        if (GLib.path_is_absolute(value))
+            return value;
+
+        return null;
+    }
+
+    _buildTrackerCommand(query) {
+        const maxResults = this._getFileSearchMaxResults();
+        return [
+            'tracker3',
+            'search',
+            '--files',
+            '--limit',
+            String(maxResults),
+            query
+        ];
+    }
+
+    _buildFileSuggestionsFromPaths(paths, maxResults) {
+        const homeDir = GLib.get_home_dir();
+        const seen = new Set();
+        const suggestions = [];
+
+        for (const path of paths) {
+            if (!path || !path.startsWith(homeDir + '/') || seen.has(path))
+                continue;
+
+            seen.add(path);
+            suggestions.push({
+                label: GLib.path_get_basename(path),
+                subtitle: path,
+                icon: 'text-x-generic-symbolic',
+                action: () => {
+                    this._runActionSafely(() => {
+                        const file = Gio.File.new_for_path(path);
+                        const uri = file.get_uri();
+                        Gio.AppInfo.launch_default_for_uri(uri, null);
+                    }, `launching file result ${path}`);
+                    this._hideResults();
+                }
+            });
+
+            if (suggestions.length >= maxResults)
+                break;
+        }
+
+        return suggestions;
+    }
+
+    async _fetchFallbackFileSuggestions(query, maxResults, cancellable) {
+        const homeDir = GLib.get_home_dir();
+        const homeQuoted = GLib.shell_quote(homeDir);
+        const patternQuoted = GLib.shell_quote(`*${query}*`);
+        const candidateLimit = Math.max(200, maxResults * 40);
+        const cmd = `find ${homeQuoted} -type f -iname ${patternQuoted} 2>/dev/null | head -n ${candidateLimit}`;
+
+        try {
+            const stdout = await this._runSubprocess(['sh', '-c', cmd], cancellable);
+            const lowerQuery = query.toLowerCase();
+            const paths = stdout
+                .split('\n')
+                .map(row => row.trim())
+                .filter(Boolean);
+
+            const ranked = paths
+                .map(path => {
+                    const base = GLib.path_get_basename(path).toLowerCase();
+                    const depth = path.split('/').length;
+                    let score = 0;
+
+                    if (base === lowerQuery) score += 1000;
+                    if (base.startsWith(lowerQuery)) score += 700;
+                    if (base.includes(lowerQuery)) score += 400;
+                    if (path.toLowerCase().includes('/documents/')) score += 100;
+                    score -= depth;
+
+                    return {path, score};
+                })
+                .sort((a, b) => b.score - a.score)
+                .map(item => item.path);
+
+            return this._buildFileSuggestionsFromPaths(ranked, maxResults);
+        } catch (e) {
+            if (e.matches?.(Gio.IOErrorEnum, Gio.IOErrorEnum.CANCELLED))
+                return [];
+
+            console.error('Panel Search: Fallback file search failed:', e);
+            return [];
+        }
+    }
+
+    async _fetchTrackerFileSuggestions(query) {
+        const minLen = this._getFileSearchMinQueryLength();
+        const maxResults = this._getFileSearchMaxResults();
+        if (query.length < minLen)
+            return [];
+
+        const requestId = ++this._fileRequestId;
+        if (this._fileSuggestCancellable) {
+            this._fileSuggestCancellable.cancel();
+            this._fileSuggestCancellable = null;
+        }
+
+        const cancellable = new Gio.Cancellable();
+        this._fileSuggestCancellable = cancellable;
+
+        try {
+            if (!this._trackerFileSearchDisabled) {
+                const stdout = await this._runSubprocess(this._buildTrackerCommand(query), cancellable);
+                if (requestId !== this._fileRequestId)
+                    return [];
+
+                const rows = stdout.split('\n');
+                const trackerPaths = rows
+                    .map(row => this._extractPathFromTrackerLine(row))
+                    .filter(Boolean);
+                const trackerSuggestions = this._buildFileSuggestionsFromPaths(trackerPaths, maxResults);
+                if (trackerSuggestions.length > 0)
+                    return trackerSuggestions;
+            }
+
+            if (requestId !== this._fileRequestId)
+                return [];
+            return await this._fetchFallbackFileSuggestions(query, maxResults, cancellable);
+        } catch (e) {
+            if (e.matches?.(Gio.IOErrorEnum, Gio.IOErrorEnum.CANCELLED))
+                return [];
+
+            // Disable file provider after failure to avoid repeated expensive process errors.
+            this._trackerFileSearchDisabled = true;
+            if (!this._trackerUnavailableLogged) {
+                console.error('Panel Search: Tracker3 file search unavailable; disabling provider for this session:', e);
+                this._trackerUnavailableLogged = true;
+            }
+            if (requestId !== this._fileRequestId)
+                return [];
+            return await this._fetchFallbackFileSuggestions(query, maxResults, cancellable);
+        } finally {
+            if (this._fileSuggestCancellable === cancellable)
+                this._fileSuggestCancellable = null;
+        }
+    }
+
+    _injectFileSuggestions(query) {
+        this._fetchTrackerFileSuggestions(query).then(suggestions => {
+            if (!this._searchEntry || this._searchEntry.get_text().trim() !== query || !suggestions)
+                return;
+
+            const changed = JSON.stringify(suggestions.map(s => `${s.label}:${s.subtitle}`)) !==
+                JSON.stringify(this._fileSuggestions.map(s => `${s.label}:${s.subtitle}`));
+            if (!changed)
+                return;
+
+            const previousLabel = this._selectedIndex >= 0 && this._selectedIndex < this._menuItems.length
+                ? this._menuItems[this._selectedIndex].label?.get_text?.()
+                : null;
+
+            this._fileSuggestions = suggestions;
+            this._renderResults(query);
+
+            if (previousLabel) {
+                const idx = this._menuItems.findIndex(i => i.label?.get_text?.() === previousLabel);
+                if (idx !== -1) {
+                    this._selectedIndex = idx;
+                    this._updateSelection(this._menuItems);
+                }
+            }
+        }).catch(e => console.error('Panel Search: File suggestion error:', e));
+    }
+
     // ─── Core search logic ───────────────────────────────────────────────────
 
     _onSearchChanged() {
@@ -445,6 +1126,9 @@ class PanelSearchWidget extends St.BoxLayout {
 
         if (query !== this._lastQuery) {
             this._webSuggestions = [];
+            this._packageSuggestions = [];
+            this._fileSuggestions = [];
+            this._weatherSuggestions = [];
             this._lastQuery = query;
         }
 
@@ -453,10 +1137,29 @@ class PanelSearchWidget extends St.BoxLayout {
             return;
         }
 
+        if (!this._settings.get_boolean('enable-file-search'))
+            this._fileSuggestions = [];
+        if (!this._settings.get_boolean('enable-weather-search'))
+            this._weatherSuggestions = [];
+        if (!this._settings.get_boolean('enable-package-search'))
+            this._packageSuggestions = [];
+
         this._renderResults(query);
 
-        if (query.length >= 2)
+        if (query.length >= PACKAGE_MIN_QUERY_LENGTH) {
             this._injectWebSuggestions(query);
+            if (this._settings.get_boolean('enable-package-search'))
+                this._injectPackageSuggestions(query);
+        }
+
+        const fileSearchEnabled = this._settings.get_boolean('enable-file-search');
+        const fileSearchMinLen = this._getFileSearchMinQueryLength();
+        if (fileSearchEnabled && query.length >= fileSearchMinLen)
+            this._injectFileSuggestions(query);
+
+        const weatherSearchEnabled = this._settings.get_boolean('enable-weather-search');
+        if (weatherSearchEnabled && this._extractWeatherLocation(query))
+            this._injectWeatherSuggestion(query);
     }
 
     _buildAppCaches() {
@@ -616,13 +1319,54 @@ class PanelSearchWidget extends St.BoxLayout {
         const completions = this._getCompletionSection(query, lowerQuery, engine, usageData, now);
         completions.forEach(row => this._addResult(row.label, row.subtitle, row.action, row.icon));
 
-        const local = this._getLocalSection(query, lowerQuery, usageData, now, this._settings.get_int('max-predictions') || 5);
+        const packages = this._settings.get_boolean('enable-package-search')
+            ? this._packageSuggestions.slice(0, this._getPackageSearchMaxResults())
+            : [];
+        if (packages.length > 0) {
+            if (completions.length > 0)
+                this._resultsMenu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem());
+            packages.forEach(row => this._addResult(row.label, row.subtitle, row.action, row.icon));
+        }
+
+        const files = this._settings.get_boolean('enable-file-search')
+            ? this._fileSuggestions.slice(0, this._getFileSearchMaxResults())
+            : [];
+        if (files.length > 0) {
+            if (completions.length > 0 || packages.length > 0)
+                this._resultsMenu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem());
+            files.forEach(row => this._addResult(row.label, row.subtitle, row.action, row.icon));
+        }
+
+        const fileWarning = this._settings.get_boolean('enable-file-search') &&
+            this._trackerFileSearchDisabled &&
+            files.length === 0;
+        if (fileWarning) {
+            if (completions.length > 0 || packages.length > 0 || files.length > 0)
+                this._resultsMenu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem());
+            this._addResult('File search unavailable', 'Tracker3 is unavailable; toggle file search to retry', null, 'dialog-warning-symbolic');
+        }
+
+        const weather = this._settings.get_boolean('enable-weather-search')
+            ? this._weatherSuggestions.slice(0, WEATHER_SUGGESTIONS_MAX)
+            : [];
+        if (weather.length > 0) {
+            if (completions.length > 0 || packages.length > 0 || files.length > 0)
+                this._resultsMenu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem());
+            weather.forEach(row => this._addResult(row.label, row.subtitle, row.action, row.icon));
+        }
+
+        const maxPredictions = this._settings.get_int('max-predictions');
+        const safeMaxPredictions = Number.isFinite(maxPredictions)
+            ? Math.max(0, Math.min(5, maxPredictions))
+            : 5;
+        const local = this._getLocalSection(query, lowerQuery, usageData, now, safeMaxPredictions);
         if (local.length > 0) {
-            if (completions.length > 0) this._resultsMenu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem());
+            if (completions.length > 0 || packages.length > 0 || files.length > 0 || fileWarning || weather.length > 0)
+                this._resultsMenu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem());
             local.forEach(row => this._addResult(row.label, row.subtitle, row.action, row.icon));
         }
 
-        if (completions.length > 0 || local.length > 0)
+        if (completions.length > 0 || packages.length > 0 || files.length > 0 || fileWarning || weather.length > 0 || local.length > 0)
             this._resultsMenu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem());
 
         const engineName = engine.charAt(0).toUpperCase() + engine.slice(1);
@@ -845,6 +1589,21 @@ class PanelSearchWidget extends St.BoxLayout {
             this._suggestCancellable = null;
         }
 
+        if (this._packageSuggestCancellable) {
+            this._packageSuggestCancellable.cancel();
+            this._packageSuggestCancellable = null;
+        }
+
+        if (this._fileSuggestCancellable) {
+            this._fileSuggestCancellable.cancel();
+            this._fileSuggestCancellable = null;
+        }
+
+        if (this._weatherSuggestCancellable) {
+            this._weatherSuggestCancellable.cancel();
+            this._weatherSuggestCancellable = null;
+        }
+
         // Abort any in-flight HTTP requests before nulling the session
         if (this._soupSession) {
             this._soupSession.abort();
@@ -862,8 +1621,11 @@ class PanelSearchWidget extends St.BoxLayout {
         }
 
         this._appSystem = null;
+        this._interfaceSettings = null;
         this._settings = null;
         this._searchEntry = null;
+        this._softwareProxy = null;
+        this._softwareProxyInit = null;
 
         super.destroy();
     }
@@ -884,7 +1646,10 @@ export default class PanelSearchExtension extends Extension {
         if (parent)
             parent.remove_child(this._widget);
 
-        container.insert_child_at_index(this._widget, position);
+        const safePosition = Math.max(0, position);
+        const childCount = typeof container.get_n_children === 'function' ? container.get_n_children() : safePosition;
+        const clampedIndex = Math.min(safePosition, childCount);
+        container.insert_child_at_index(this._widget, clampedIndex);
         this._container = container;
     }
 

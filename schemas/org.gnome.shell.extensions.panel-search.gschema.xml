@@ -8,6 +8,7 @@
     </key>
     <key name="panel-position" type="i">
       <default>0</default>
+      <range min="0" max="100"/>
       <summary>Position in panel</summary>
       <description>Position index in the panel (0 = leftmost)</description>
     </key>
@@ -23,8 +24,53 @@
     </key>
     <key name="max-predictions" type="i">
       <default>3</default>
+      <range min="0" max="5"/>
       <summary>Maximum predictions to show</summary>
       <description>Number of predictive suggestions to display (0-5)</description>
+    </key>
+    <key name="enable-file-search" type="b">
+      <default>true</default>
+      <summary>Enable local file search</summary>
+      <description>Show local file suggestions from Tracker index in search results</description>
+    </key>
+    <key name="file-search-max-results" type="i">
+      <default>6</default>
+      <range min="1" max="15"/>
+      <summary>Maximum file suggestions</summary>
+      <description>Maximum number of local file suggestions to display (1-15)</description>
+    </key>
+    <key name="file-search-min-query-length" type="i">
+      <default>3</default>
+      <range min="1" max="20"/>
+      <summary>File search minimum query length</summary>
+      <description>Minimum number of typed characters before querying local file suggestions</description>
+    </key>
+    <key name="enable-weather-search" type="b">
+      <default>true</default>
+      <summary>Enable weather search</summary>
+      <description>Show current weather results for location queries</description>
+    </key>
+    <key name="weather-units" type="s">
+      <default>"fahrenheit"</default>
+      <summary>Weather temperature units</summary>
+      <description>Temperature unit for weather search results (fahrenheit or celsius)</description>
+    </key>
+    <key name="enable-package-search" type="b">
+      <default>true</default>
+      <summary>Enable package search</summary>
+      <description>Show software package suggestions from GNOME Software provider</description>
+    </key>
+    <key name="package-search-max-results" type="i">
+      <default>4</default>
+      <range min="1" max="10"/>
+      <summary>Maximum package suggestions</summary>
+      <description>Maximum number of package suggestions to display (1-10)</description>
+    </key>
+    <key name="search-debounce-ms" type="i">
+      <default>150</default>
+      <range min="50" max="500"/>
+      <summary>Search debounce delay</summary>
+      <description>Delay before running search after typing, in milliseconds (50-500)</description>
     </key>
   </schema>
 </schemalist>

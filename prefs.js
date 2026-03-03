@@ -102,6 +102,140 @@ export default class PanelSearchPreferences extends ExtensionPreferences {
         
         clearHistoryRow.add_suffix(clearButton);
         generalGroup.add(clearHistoryRow);
+
+        // Providers group
+        const providersGroup = new Adw.PreferencesGroup({
+            title: 'Search Providers',
+            description: 'Enable and configure additional result sources'
+        });
+        page.add(providersGroup);
+
+        const fileSearchRow = new Adw.SwitchRow({
+            title: 'Local File Search',
+            subtitle: 'Show file suggestions from Tracker index'
+        });
+        settings.bind(
+            'enable-file-search',
+            fileSearchRow,
+            'active',
+            Gio.SettingsBindFlags.DEFAULT
+        );
+        providersGroup.add(fileSearchRow);
+
+        const fileResultsRow = new Adw.SpinRow({
+            title: 'File Result Limit',
+            subtitle: 'Maximum local file suggestions (1-15)',
+            adjustment: new Gtk.Adjustment({
+                lower: 1,
+                upper: 15,
+                step_increment: 1
+            })
+        });
+        settings.bind(
+            'file-search-max-results',
+            fileResultsRow,
+            'value',
+            Gio.SettingsBindFlags.DEFAULT
+        );
+        providersGroup.add(fileResultsRow);
+
+        const fileMinCharsRow = new Adw.SpinRow({
+            title: 'File Query Min Length',
+            subtitle: 'Minimum characters before file lookup starts (1-20)',
+            adjustment: new Gtk.Adjustment({
+                lower: 1,
+                upper: 20,
+                step_increment: 1
+            })
+        });
+        settings.bind(
+            'file-search-min-query-length',
+            fileMinCharsRow,
+            'value',
+            Gio.SettingsBindFlags.DEFAULT
+        );
+        providersGroup.add(fileMinCharsRow);
+
+        const weatherSearchRow = new Adw.SwitchRow({
+            title: 'Weather Search',
+            subtitle: 'Enable location weather queries (e.g., "weather Boston")'
+        });
+        settings.bind(
+            'enable-weather-search',
+            weatherSearchRow,
+            'active',
+            Gio.SettingsBindFlags.DEFAULT
+        );
+        providersGroup.add(weatherSearchRow);
+
+        const weatherUnitsRow = new Adw.ComboRow({
+            title: 'Weather Units',
+            subtitle: 'Temperature unit for weather results',
+            model: new Gtk.StringList({
+                strings: ['Fahrenheit', 'Celsius']
+            })
+        });
+        const weatherUnitMap = ['fahrenheit', 'celsius'];
+        const currentWeatherUnits = settings.get_string('weather-units');
+        const selectedWeatherUnits = weatherUnitMap.indexOf(currentWeatherUnits);
+        weatherUnitsRow.set_selected(selectedWeatherUnits >= 0 ? selectedWeatherUnits : 0);
+        weatherUnitsRow.connect('notify::selected', (widget) => {
+            const selected = weatherUnitMap[widget.selected] ?? 'fahrenheit';
+            settings.set_string('weather-units', selected);
+        });
+        providersGroup.add(weatherUnitsRow);
+
+        const packageSearchRow = new Adw.SwitchRow({
+            title: 'Package Search',
+            subtitle: 'Show software package suggestions from GNOME Software'
+        });
+        settings.bind(
+            'enable-package-search',
+            packageSearchRow,
+            'active',
+            Gio.SettingsBindFlags.DEFAULT
+        );
+        providersGroup.add(packageSearchRow);
+
+        const packageResultsRow = new Adw.SpinRow({
+            title: 'Package Result Limit',
+            subtitle: 'Maximum package suggestions (1-10)',
+            adjustment: new Gtk.Adjustment({
+                lower: 1,
+                upper: 10,
+                step_increment: 1
+            })
+        });
+        settings.bind(
+            'package-search-max-results',
+            packageResultsRow,
+            'value',
+            Gio.SettingsBindFlags.DEFAULT
+        );
+        providersGroup.add(packageResultsRow);
+
+        const debounceRow = new Adw.SpinRow({
+            title: 'Search Debounce (ms)',
+            subtitle: 'Delay before search runs after typing (50-500 ms)',
+            adjustment: new Gtk.Adjustment({
+                lower: 50,
+                upper: 500,
+                step_increment: 10
+            })
+        });
+        settings.bind(
+            'search-debounce-ms',
+            debounceRow,
+            'value',
+            Gio.SettingsBindFlags.DEFAULT
+        );
+        providersGroup.add(debounceRow);
+
+        const suggestionsSourceRow = new Adw.ActionRow({
+            title: 'Suggestions Source',
+            subtitle: 'Autocomplete suggestions currently use DuckDuckGo regardless of selected search engine'
+        });
+        providersGroup.add(suggestionsSourceRow);
         
         // Panel position group
         const positionGroup = new Adw.PreferencesGroup({
@@ -160,7 +294,7 @@ export default class PanelSearchPreferences extends ExtensionPreferences {
         
         const usageRow = new Adw.ActionRow({
             title: 'Search Features',
-            subtitle: 'Apps, Settings, Calculator (e.g., "2+2"), Unit conversion (e.g., "10 km to mi"), Predictions, Web search'
+            subtitle: 'Apps, Settings, Local files, Weather (e.g., "weather Boston"), Calculator, Unit conversion, Predictions, Web search'
         });
         infoGroup.add(usageRow);
         

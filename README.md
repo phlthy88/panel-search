@@ -51,6 +51,15 @@ gnome-extensions prefs panel-search@phlthy88.github.io
 - **Panel Box**: Place widget in left, center, or right section
 - **Position Index**: Control order within the selected box
 - **Maximum Predictions**: Number of suggestions to show (0-5)
+- **Local File Search**: Enable/disable Tracker-based file suggestions
+- **File Result Limit**: Control number of file results shown
+- **File Query Min Length**: Minimum characters before file lookup starts
+- **Weather Search**: Enable/disable weather intent queries (`weather`, `wx`, `temp`)
+- **Weather Units**: Fahrenheit or Celsius
+- **Package Search**: Enable/disable GNOME Software package suggestions
+- **Package Result Limit**: Control number of package results shown
+- **Search Debounce**: Delay before search runs after typing (50-500 ms)
+- **Suggestion Source**: Suggestions currently come from DuckDuckGo autocomplete
 - **Clear Search History**: Reset learned predictions
 
 ## Usage
