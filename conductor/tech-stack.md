@@ -11,7 +11,7 @@ Panel Search is built as a native GNOME Shell extension using the GNOME JavaScri
 ## Libraries & APIs
 - **GLib:** Core utility functions and system interaction.
 - **GObject:** Object-oriented programming model for the GNOME platform.
-- **Gio:** High-level I/O library for file system access and settings management.
+- **Gio:** High-level I/O library for file system access (including FileEnumerator for scanning) and settings management.
 - **St (Shell Toolkit):** UI toolkit for creating GNOME Shell components (e.g., the search widget).
 - **Clutter:** Animation and layout engine used within the shell.
 - **Shell API:** Direct access to GNOME Shell's search providers and window management.

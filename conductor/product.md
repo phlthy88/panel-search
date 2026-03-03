@@ -13,13 +13,13 @@ Panel Search is a GNOME Shell extension designed to unify system search, web sea
 ## Key Goals
 - **Comprehensive Search:** Merge application, settings, and web search into one intelligent omnibox.
 - **Seamless GNOME Integration:** Ensure the widget looks and feels like a native part of GNOME Shell.
-- **User-Centric Ranking:** Prioritize search results based on frequent usage to learn from user behavior.
+- **User-Centric Ranking:** Prioritize search results based on frequent usage and intelligent fuzzy matching.
 
 ## Core Features
 - **Unified Omnibox Search:** A single entry point for all search sources (apps, settings, files, web).
 - **Built-in Utilities:** Native support for basic math, unit conversions (distance, weight, volume), and web search (Google, DuckDuckGo, Bing).
 - **Predictive Search:** Intelligent ranking that highlights frequently used items.
-- **Fuzzy Search:** Resilient search logic for apps and settings.
+- **Fuzzy Search:** Resilient, high-performance fuzzy matching for apps, settings, and local files.
 
 ## Constraints & Requirements
 - **GNOME HIG Compliance:** Adhere strictly to GNOME's Human Interface Guidelines for visual consistency.
