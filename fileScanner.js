@@ -153,6 +153,10 @@ export class FileScanner {
         }
     }
 
+    destroy() {
+        this.root = null;
+    }
+
     _pushResultByScore(results, entry, maxResults) {
         let insertAt = results.length;
         for (let i = 0; i < results.length; i++) {

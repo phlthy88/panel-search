@@ -241,6 +241,7 @@ class PanelSearchWidget extends St.BoxLayout {
         this._lastQuery = '';
         this._menuHovered = false;
         this._signals = [];
+        this._cacheWarmupId = null;
 
         // Invalidate app cache when apps change
         this._signals.push({
@@ -248,6 +249,7 @@ class PanelSearchWidget extends St.BoxLayout {
             id: this._appSystem.connect('installed-changed', () => {
                 this._settingsAppsCache = null;
                 this._settingsOnlyCache = null;
+                this._scheduleAppCacheWarmup();
             })
         });
 
@@ -365,6 +367,22 @@ class PanelSearchWidget extends St.BoxLayout {
                 });
             }) }
         );
+
+        this._scheduleAppCacheWarmup();
+    }
+
+    _scheduleAppCacheWarmup() {
+        if (this._cacheWarmupId)
+            return;
+
+        this._cacheWarmupId = GLib.idle_add(GLib.PRIORITY_DEFAULT_IDLE, () => {
+            this._cacheWarmupId = null;
+            if (!this._appSystem || this._settingsAppsCache)
+                return GLib.SOURCE_REMOVE;
+
+            this._buildAppCaches();
+            return GLib.SOURCE_REMOVE;
+        });
     }
 
     // ─── Visibility helpers ──────────────────────────────────────────────────
@@ -1466,6 +1484,11 @@ class PanelSearchWidget extends St.BoxLayout {
             this._focusOutTimeoutId = null;
         }
 
+        if (this._cacheWarmupId) {
+            GLib.source_remove(this._cacheWarmupId);
+            this._cacheWarmupId = null;
+        }
+
         if (this._suggestCancellable) {
             this._suggestCancellable.cancel();
             this._suggestCancellable = null;
@@ -1506,6 +1529,10 @@ class PanelSearchWidget extends St.BoxLayout {
         this._interfaceSettings = null;
         this._settings = null;
         this._searchEntry = null;
+        if (this._fileSearchProvider) {
+            this._fileSearchProvider.destroy();
+            this._fileSearchProvider = null;
+        }
         this._softwareProxy = null;
         this._softwareProxyInit = null;
 

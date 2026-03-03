@@ -98,4 +98,14 @@ export class FileSearchProvider {
             }
         }));
     }
+
+    destroy() {
+        if (this._scanner) {
+            this._scanner.destroy();
+            this._scanner = null;
+        }
+
+        this._settings = null;
+        this._scannerRootPath = null;
+    }
 }
