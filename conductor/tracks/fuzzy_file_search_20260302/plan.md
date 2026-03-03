@@ -18,10 +18,10 @@
 - [x] Task: Conductor - User Manual Verification 'Phase 2: Search Logic & Integration' (Protocol in workflow.md)
 
 ## Phase 3: UI & Refinement
-- [x] Task: Enhance UI for file search results
+- [x] Task: Enhance UI for file search results [7c01705]
     - [x] Add file-specific icons and path tooltips
     - [x] Write tests for result rendering
-- [x] Task: Performance optimization and debouncing
+- [x] Task: Performance optimization and debouncing [7c01705]
     - [x] Implement search delays for large directories
     - [x] Verify resource efficiency constraints
 - [ ] Task: Conductor - User Manual Verification 'Phase 3: UI & Refinement' (Protocol in workflow.md)
