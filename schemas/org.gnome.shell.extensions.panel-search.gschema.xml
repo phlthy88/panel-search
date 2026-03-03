@@ -31,7 +31,7 @@
     <key name="enable-file-search" type="b">
       <default>true</default>
       <summary>Enable local file search</summary>
-      <description>Show local file suggestions from Tracker index in search results</description>
+      <description>Show local file suggestions by scanning the local filesystem</description>
     </key>
     <key name="file-search-max-results" type="i">
       <default>6</default>
@@ -56,6 +56,11 @@
       <range min="10" max="500"/>
       <summary>File search directory budget</summary>
       <description>Maximum number of directories to scan per query for local file suggestions (10-500)</description>
+    </key>
+    <key name="file-search-root-path" type="s">
+      <default>""</default>
+      <summary>File search root path</summary>
+      <description>Root directory for local file scanning; blank means home directory. Relative paths are resolved under home.</description>
     </key>
     <key name="enable-weather-search" type="b">
       <default>true</default>

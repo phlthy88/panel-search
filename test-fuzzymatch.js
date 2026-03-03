@@ -47,6 +47,22 @@ runner.add('fuzzyScore should return higher score for start matches', async () =
     if (score1 <= score2) throw new Error(`Expected score1 (${score1}) > score2 (${score2})`);
 });
 
+runner.add('fuzzyScore should prefer contiguous matches over scattered ones', async () => {
+    const contiguous = fuzzyScore('abc', 'abc-notes');
+    const scattered = fuzzyScore('abc', 'a_long_b_gap_c_file');
+    if (contiguous <= scattered) {
+        throw new Error(`Expected contiguous (${contiguous}) > scattered (${scattered})`);
+    }
+});
+
+runner.add('fuzzyScore should favor word boundaries', async () => {
+    const boundary = fuzzyScore('cfg', 'config_file');
+    const embedded = fuzzyScore('cfg', 'myconfigfile');
+    if (boundary <= embedded) {
+        throw new Error(`Expected boundary (${boundary}) > embedded (${embedded})`);
+    }
+});
+
 runner.add('fuzzyScore should return 0 if no match', async () => {
     const score = fuzzyScore('abc', 'test');
     if (score !== 0) throw new Error(`Expected 0, got ${score}`);

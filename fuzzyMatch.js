@@ -12,29 +12,43 @@ export function fuzzyScore(query, text, preLowercased = false) {
     const t = preLowercased ? text : text.toLowerCase();
 
     if (q === t) return 100;
-
-    let score = 0;
-    let qi = 0;
-    let consecutive = 0;
-
-    // Start match bonus
-    if (t.startsWith(q)) {
-        score += 50;
+    const positions = [];
+    let searchFrom = 0;
+    for (let i = 0; i < q.length; i++) {
+        const idx = t.indexOf(q[i], searchFrom);
+        if (idx === -1)
+            return 0;
+        positions.push(idx);
+        searchFrom = idx + 1;
     }
 
-    for (let i = 0; i < t.length && qi < q.length; i++) {
-        if (t[i] === q[qi]) {
-            qi++;
-            consecutive++;
-            score += 10 + (consecutive * 5);
+    let score = q.length * 8;
+    const firstPos = positions[0];
+    if (firstPos === 0)
+        score += 20;
+    if (t.startsWith(q))
+        score += 20;
+
+    let runLength = 1;
+    for (let i = 0; i < positions.length; i++) {
+        const pos = positions[i];
+        const prev = pos > 0 ? t[pos - 1] : '';
+        if (pos === 0 || !/[a-z0-9]/.test(prev))
+            score += 4;
+
+        if (i === 0)
+            continue;
+
+        if (positions[i] === positions[i - 1] + 1) {
+            runLength++;
+            score += 6 + Math.min(6, runLength);
         } else {
-            consecutive = 0;
-            score -= 1;
+            const gap = positions[i] - positions[i - 1] - 1;
+            runLength = 1;
+            score -= Math.min(8, gap * 2);
         }
     }
 
-    // All query characters must match
-    if (qi < q.length) return 0;
-
-    return Math.max(0, score);
+    score -= Math.min(30, Math.max(0, t.length - q.length));
+    return Math.max(0, Math.round(score));
 }

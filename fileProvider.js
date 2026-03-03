@@ -9,27 +9,81 @@ export class FileSearchProvider {
     constructor(settings) {
         this._settings = settings;
         this._scanner = new FileScanner(GLib.get_home_dir());
+        this._scannerRootPath = GLib.get_home_dir();
     }
 
     _getMinQueryLength() {
-        const value = this._settings?.get_int('file-search-min-query-length');
+        let value;
+        try {
+            value = this._settings?.get_int?.('file-search-min-query-length');
+        } catch (_e) {
+            return 3;
+        }
         if (!Number.isFinite(value))
             return 3;
         return Math.max(1, Math.min(20, value));
     }
 
     _getMaxScanDepth() {
-        const value = this._settings?.get_int('file-search-max-depth');
+        let value;
+        try {
+            value = this._settings?.get_int?.('file-search-max-depth');
+        } catch (_e) {
+            return 2;
+        }
         if (!Number.isFinite(value))
             return 2;
         return Math.max(1, Math.min(6, value));
     }
 
     _getMaxScanDirectories() {
-        const value = this._settings?.get_int('file-search-max-directories');
+        let value;
+        try {
+            value = this._settings?.get_int?.('file-search-max-directories');
+        } catch (_e) {
+            return 50;
+        }
         if (!Number.isFinite(value))
             return 50;
         return Math.max(10, Math.min(500, value));
+    }
+
+    _getConfiguredRootPath() {
+        let rawPath;
+        try {
+            rawPath = this._settings?.get_string?.('file-search-root-path');
+        } catch (_e) {
+            return null;
+        }
+        if (typeof rawPath !== 'string')
+            return null;
+        const normalized = rawPath.trim();
+        return normalized.length > 0 ? normalized : null;
+    }
+
+    _getActiveRootPath() {
+        const configured = this._getConfiguredRootPath();
+        if (!configured)
+            return GLib.get_home_dir();
+        const candidate = GLib.path_is_absolute(configured)
+            ? configured
+            : GLib.build_filenamev([GLib.get_home_dir(), configured]);
+        try {
+            const file = Gio.File.new_for_path(candidate);
+            const fileType = file.query_file_type(Gio.FileQueryInfoFlags.NOFOLLOW_SYMLINKS, null);
+            if (fileType === Gio.FileType.DIRECTORY)
+                return candidate;
+        } catch (_e) {}
+        return GLib.get_home_dir();
+    }
+
+    _getScanner() {
+        const rootPath = this._getActiveRootPath();
+        if (!this._scanner || this._scannerRootPath !== rootPath) {
+            this._scanner = new FileScanner(rootPath);
+            this._scannerRootPath = rootPath;
+        }
+        return this._scanner;
     }
 
     /**
@@ -42,7 +96,7 @@ export class FileSearchProvider {
     async getSuggestions(query, maxResults = 10, cancellable = null) {
         if (!query || query.length < this._getMinQueryLength()) return [];
 
-        const rawFiles = await this._scanner.scan(
+        const rawFiles = await this._getScanner().scan(
             query,
             maxResults * 5,
             cancellable,

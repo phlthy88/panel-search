@@ -112,7 +112,7 @@ export default class PanelSearchPreferences extends ExtensionPreferences {
 
         const fileSearchRow = new Adw.SwitchRow({
             title: 'Local File Search',
-            subtitle: 'Show file suggestions from Tracker index'
+            subtitle: 'Show file suggestions by scanning the local filesystem'
         });
         settings.bind(
             'enable-file-search',
@@ -190,6 +190,20 @@ export default class PanelSearchPreferences extends ExtensionPreferences {
             Gio.SettingsBindFlags.DEFAULT
         );
         providersGroup.add(fileMaxDirectoriesRow);
+
+        const fileRootPathRow = new Adw.EntryRow({
+            title: 'File Search Root',
+            text: settings.get_string('file-search-root-path'),
+            show_apply_button: true,
+            tooltip_text: 'Absolute path or path relative to home (blank = home directory)'
+        });
+        settings.bind(
+            'file-search-root-path',
+            fileRootPathRow,
+            'text',
+            Gio.SettingsBindFlags.DEFAULT
+        );
+        providersGroup.add(fileRootPathRow);
 
         const weatherSearchRow = new Adw.SwitchRow({
             title: 'Weather Search',
@@ -306,7 +320,7 @@ export default class PanelSearchPreferences extends ExtensionPreferences {
             subtitle: 'Order within the selected box (0 = first)',
             adjustment: new Gtk.Adjustment({
                 lower: 0,
-                upper: 20,
+                upper: 100,
                 step_increment: 1
             })
         });

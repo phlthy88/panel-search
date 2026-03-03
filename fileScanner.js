@@ -35,7 +35,6 @@ export class FileScanner {
 
     async _enumerateRecursive(directory, lowerQuery, results, maxResults, cancellable, currentDepth, maxDepth, state, maxDirs) {
         if (cancellable?.is_cancelled()) return;
-        if (results.length >= maxResults) return;
         if (currentDepth > maxDepth) return;
         if (state.dirsScanned >= maxDirs) return;
 
@@ -46,7 +45,7 @@ export class FileScanner {
             enumerator = await new Promise((resolve, reject) => {
                 directory.enumerate_children_async(
                     'standard::name,standard::type,standard::icon',
-                    Gio.FileQueryInfoFlags.NONE,
+                    Gio.FileQueryInfoFlags.NOFOLLOW_SYMLINKS,
                     GLib.PRIORITY_DEFAULT,
                     cancellable,
                     (obj, res) => {
@@ -76,7 +75,6 @@ export class FileScanner {
         try {
             while (true) {
                 if (cancellable?.is_cancelled()) break;
-                if (results.length >= maxResults) break;
 
                 let infos;
                 try {
@@ -121,17 +119,15 @@ export class FileScanner {
                         const score = fuzzyScore(lowerQuery, lowerName, true);
 
                         if (score > 0) {
-                            results.push({
+                            this._pushResultByScore(results, {
                                 name: name,
                                 path: child.get_path(),
                                 uri: child.get_uri(),
                                 icon: info.get_icon(),
                                 score
-                            });
+                            }, maxResults);
                         }
                     }
-
-                    if (results.length >= maxResults) break;
                 }
             }
         } finally {
@@ -155,5 +151,23 @@ export class FileScanner {
                 );
             }
         }
+    }
+
+    _pushResultByScore(results, entry, maxResults) {
+        let insertAt = results.length;
+        for (let i = 0; i < results.length; i++) {
+            if (entry.score > results[i].score) {
+                insertAt = i;
+                break;
+            }
+        }
+
+        if (insertAt === results.length)
+            results.push(entry);
+        else
+            results.splice(insertAt, 0, entry);
+
+        if (results.length > maxResults)
+            results.pop();
     }
 }

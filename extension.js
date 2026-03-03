@@ -300,16 +300,42 @@ class PanelSearchWidget extends St.BoxLayout {
             }) },
             { obj: this._settings, id: this._settings.connect('changed::enable-file-search', () => {
                 const enabled = this._settings?.get_boolean('enable-file-search');
+                const query = this._searchEntry?.get_text?.().trim() ?? '';
                 if (enabled) {
                     this._fileSearchError = null;
+                    if (query.length >= this._getFileSearchMinQueryLength())
+                        this._injectFileSuggestions(query);
                 } else {
+                    this._fileSuggestCancellable?.cancel();
+                    this._fileSuggestCancellable = null;
                     this._fileSuggestions = [];
                     this._fileSearchError = null;
                 }
+                this._renderCurrentQuery();
             }) },
             { obj: this._settings, id: this._settings.connect('changed::enable-package-search', () => {
-                if (!this._settings?.get_boolean('enable-package-search'))
+                const enabled = this._settings?.get_boolean('enable-package-search');
+                const query = this._searchEntry?.get_text?.().trim() ?? '';
+                if (!enabled) {
+                    this._packageSuggestCancellable?.cancel();
+                    this._packageSuggestCancellable = null;
                     this._packageSuggestions = [];
+                } else if (query.length >= PACKAGE_MIN_QUERY_LENGTH) {
+                    this._injectPackageSuggestions(query);
+                }
+                this._renderCurrentQuery();
+            }) },
+            { obj: this._settings, id: this._settings.connect('changed::enable-weather-search', () => {
+                const enabled = this._settings?.get_boolean('enable-weather-search');
+                const query = this._searchEntry?.get_text?.().trim() ?? '';
+                if (!enabled) {
+                    this._weatherSuggestCancellable?.cancel();
+                    this._weatherSuggestCancellable = null;
+                    this._weatherSuggestions = [];
+                } else if (this._extractWeatherLocation(query)) {
+                    this._injectWeatherSuggestion(query);
+                }
+                this._renderCurrentQuery();
             }) },
             { obj: this._resultsMenu.actor, id: this._resultsMenu.actor.connect('enter-event', () => { this._menuHovered = true; }) },
             { obj: this._resultsMenu.actor, id: this._resultsMenu.actor.connect('leave-event', () => { this._menuHovered = false; }) },
@@ -334,6 +360,15 @@ class PanelSearchWidget extends St.BoxLayout {
     _showResults() {
         if (this._searchEntry.get_text().trim().length > 0)
             this._resultsMenu.open(true);
+    }
+
+    _renderCurrentQuery() {
+        if (!this._searchEntry || !this._resultsMenu)
+            return;
+        const query = this._searchEntry.get_text().trim();
+        if (query.length === 0)
+            return;
+        this._renderResults(query);
     }
 
     _applyThemeClass() {
@@ -747,28 +782,48 @@ class PanelSearchWidget extends St.BoxLayout {
     }
 
     _getFileSearchMaxResults() {
-        const value = this._settings.get_int('file-search-max-results');
+        let value;
+        try {
+            value = this._settings.get_int('file-search-max-results');
+        } catch (_e) {
+            return DEFAULT_FILE_SUGGESTIONS_MAX;
+        }
         if (!Number.isFinite(value))
             return DEFAULT_FILE_SUGGESTIONS_MAX;
         return Math.max(1, Math.min(15, value));
     }
 
     _getFileSearchMinQueryLength() {
-        const value = this._settings.get_int('file-search-min-query-length');
+        let value;
+        try {
+            value = this._settings.get_int('file-search-min-query-length');
+        } catch (_e) {
+            return DEFAULT_FILE_MIN_QUERY_LENGTH;
+        }
         if (!Number.isFinite(value))
             return DEFAULT_FILE_MIN_QUERY_LENGTH;
         return Math.max(1, Math.min(20, value));
     }
 
     _getPackageSearchMaxResults() {
-        const value = this._settings.get_int('package-search-max-results');
+        let value;
+        try {
+            value = this._settings.get_int('package-search-max-results');
+        } catch (_e) {
+            return DEFAULT_PACKAGE_SUGGESTIONS_MAX;
+        }
         if (!Number.isFinite(value))
             return DEFAULT_PACKAGE_SUGGESTIONS_MAX;
         return Math.max(1, Math.min(10, value));
     }
 
     _getSearchDebounceMs() {
-        const value = this._settings.get_int('search-debounce-ms');
+        let value;
+        try {
+            value = this._settings.get_int('search-debounce-ms');
+        } catch (_e) {
+            return DEFAULT_SEARCH_DEBOUNCE_MS;
+        }
         if (!Number.isFinite(value))
             return DEFAULT_SEARCH_DEBOUNCE_MS;
         return Math.max(50, Math.min(500, value));
@@ -1232,7 +1287,10 @@ class PanelSearchWidget extends St.BoxLayout {
     // ─── Result row builder ──────────────────────────────────────────────────
 
     _addResult(title, subtitle, callback, icon) {
-        const item = new PopupMenu.PopupImageMenuItem(title, icon);
+        const iconName = typeof icon === 'string' ? icon : 'text-x-generic-symbolic';
+        const item = new PopupMenu.PopupImageMenuItem(title, iconName);
+        if (icon && typeof icon !== 'string' && item?._icon && 'gicon' in item._icon)
+            item._icon.gicon = icon;
 
         if (subtitle) {
             const label = new St.Label({
