@@ -8,6 +8,8 @@ import Soup from 'gi://Soup?version=3.0';
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 import * as PopupMenu from 'resource:///org/gnome/shell/ui/popupMenu.js';
 import {Extension} from 'resource:///org/gnome/shell/extensions/extension.js';
+import { FileSearchProvider } from './fileProvider.js';
+import { fuzzyScore } from './fuzzyMatch.js';
 
 const SEARCH_ENGINES = {
     google: 'https://www.google.com/search?q=',
@@ -226,6 +228,7 @@ class PanelSearchWidget extends St.BoxLayout {
         this._packageSuggestions = [];
         this._fileSuggestions = [];
         this._weatherSuggestions = [];
+        this._fileSearchProvider = new FileSearchProvider(settings);
         this._soupSession = new Soup.Session();
         this._suggestCancellable = null;
         this._packageSuggestCancellable = null;
@@ -234,9 +237,6 @@ class PanelSearchWidget extends St.BoxLayout {
         this._softwareProxy = null;
         this._softwareProxyInit = null;
         this._softwareUnavailableLogged = false;
-        this._trackerUnavailableLogged = false;
-        this._trackerFileSearchDisabled = false;
-        this._fileRequestId = 0;
         this._lastQuery = '';
         this._menuHovered = false;
         this._signals = [];
@@ -904,144 +904,8 @@ class PanelSearchWidget extends St.BoxLayout {
         }).catch(e => console.error('Panel Search: Weather suggestion error:', e));
     }
 
-    async _runSubprocess(argv, cancellable) {
-        const proc = Gio.Subprocess.new(
-            argv,
-            Gio.SubprocessFlags.STDOUT_PIPE | Gio.SubprocessFlags.STDERR_PIPE
-        );
-
-        return await new Promise((resolve, reject) => {
-            proc.communicate_utf8_async(null, cancellable, (_obj, res) => {
-                try {
-                    const [ok, stdout, stderr] = proc.communicate_utf8_finish(res);
-                    if (!ok || proc.get_exit_status() !== 0) {
-                        reject(new Error(stderr?.trim() || `command failed: ${argv.join(' ')}`));
-                        return;
-                    }
-                    resolve(stdout || '');
-                } catch (e) {
-                    reject(e);
-                }
-            });
-        });
-    }
-
-    _extractPathFromTrackerLine(line) {
-        let value = line.trim();
-        if (!value)
-            return null;
-
-        // tracker3 search output can include numeric prefixes like "1. /path"
-        value = value.replace(/^\d+\.\s*/, '').trim();
-        if (!value)
-            return null;
-
-        if (value.startsWith('file://')) {
-            try {
-                return Gio.File.new_for_uri(value).get_path();
-            } catch (_e) {
-                return null;
-            }
-        }
-
-        if (GLib.path_is_absolute(value))
-            return value;
-
-        return null;
-    }
-
-    _buildTrackerCommand(query) {
-        const maxResults = this._getFileSearchMaxResults();
-        return [
-            'tracker3',
-            'search',
-            '--files',
-            '--limit',
-            String(maxResults),
-            query
-        ];
-    }
-
-    _buildFileSuggestionsFromPaths(paths, maxResults) {
-        const homeDir = GLib.get_home_dir();
-        const seen = new Set();
-        const suggestions = [];
-
-        for (const path of paths) {
-            if (!path || !path.startsWith(homeDir + '/') || seen.has(path))
-                continue;
-
-            seen.add(path);
-            suggestions.push({
-                label: GLib.path_get_basename(path),
-                subtitle: path,
-                icon: 'text-x-generic-symbolic',
-                action: () => {
-                    this._runActionSafely(() => {
-                        const file = Gio.File.new_for_path(path);
-                        const uri = file.get_uri();
-                        Gio.AppInfo.launch_default_for_uri(uri, null);
-                    }, `launching file result ${path}`);
-                    this._hideResults();
-                }
-            });
-
-            if (suggestions.length >= maxResults)
-                break;
-        }
-
-        return suggestions;
-    }
-
-    async _fetchFallbackFileSuggestions(query, maxResults, cancellable) {
-        const homeDir = GLib.get_home_dir();
-        const homeQuoted = GLib.shell_quote(homeDir);
-        const patternQuoted = GLib.shell_quote(`*${query}*`);
-        const candidateLimit = Math.max(200, maxResults * 40);
-        const cmd = `find ${homeQuoted} -type f -iname ${patternQuoted} 2>/dev/null | head -n ${candidateLimit}`;
-
-        try {
-            const stdout = await this._runSubprocess(['sh', '-c', cmd], cancellable);
-            const lowerQuery = query.toLowerCase();
-            const paths = stdout
-                .split('\n')
-                .map(row => row.trim())
-                .filter(Boolean);
-
-            const ranked = paths
-                .map(path => {
-                    const base = GLib.path_get_basename(path).toLowerCase();
-                    const depth = path.split('/').length;
-                    let score = 0;
-
-                    if (base === lowerQuery) score += 1000;
-                    if (base.startsWith(lowerQuery)) score += 700;
-                    if (base.includes(lowerQuery)) score += 400;
-                    if (path.toLowerCase().includes('/documents/')) score += 100;
-                    score -= depth;
-
-                    return {path, score};
-                })
-                .sort((a, b) => b.score - a.score)
-                .map(item => item.path);
-
-            return this._buildFileSuggestionsFromPaths(ranked, maxResults);
-        } catch (e) {
-            if (e.matches?.(Gio.IOErrorEnum, Gio.IOErrorEnum.CANCELLED))
-                return [];
-
-            console.error('Panel Search: Fallback file search failed:', e);
-            return [];
-        }
-    }
-
-    async _fetchTrackerFileSuggestions(query) {
-        const minLen = this._getFileSearchMinQueryLength();
-        const maxResults = this._getFileSearchMaxResults();
-        if (query.length < minLen)
-            return [];
-
-        const requestId = ++this._fileRequestId;
+    _getActivationTimestamp() {
+    _injectFileSuggestions(query) {
         if (this._fileSuggestCancellable) {
             this._fileSuggestCancellable.cancel();
             this._fileSuggestCancellable = null;
@@ -1050,45 +914,11 @@ class PanelSearchWidget extends St.BoxLayout {
         const cancellable = new Gio.Cancellable();
         this._fileSuggestCancellable = cancellable;
 
-        try {
-            if (!this._trackerFileSearchDisabled) {
-                const stdout = await this._runSubprocess(this._buildTrackerCommand(query), cancellable);
-                if (requestId !== this._fileRequestId)
-                    return [];
-
-                const rows = stdout.split('\n');
-                const trackerPaths = rows
-                    .map(row => this._extractPathFromTrackerLine(row))
-                    .filter(Boolean);
-                const trackerSuggestions = this._buildFileSuggestionsFromPaths(trackerPaths, maxResults);
-                if (trackerSuggestions.length > 0)
-                    return trackerSuggestions;
-            }
-
-            if (requestId !== this._fileRequestId)
-                return [];
-            return await this._fetchFallbackFileSuggestions(query, maxResults, cancellable);
-        } catch (e) {
-            if (e.matches?.(Gio.IOErrorEnum, Gio.IOErrorEnum.CANCELLED))
-                return [];
-
-            // Disable file provider after failure to avoid repeated expensive process errors.
-            this._trackerFileSearchDisabled = true;
-            if (!this._trackerUnavailableLogged) {
-                console.error('Panel Search: Tracker3 file search unavailable; disabling provider for this session:', e);
-                this._trackerUnavailableLogged = true;
-            }
-            if (requestId !== this._fileRequestId)
-                return [];
-            return await this._fetchFallbackFileSuggestions(query, maxResults, cancellable);
-        } finally {
-            if (this._fileSuggestCancellable === cancellable)
-                this._fileSuggestCancellable = null;
-        }
-    }
-
-    _injectFileSuggestions(query) {
-        this._fetchTrackerFileSuggestions(query).then(suggestions => {
+        this._fileSearchProvider.getSuggestions(
+            query,
+            this._getFileSearchMaxResults(),
+            cancellable
+        ).then(suggestions => {
             if (!this._searchEntry || this._searchEntry.get_text().trim() !== query || !suggestions)
                 return;
 
@@ -1111,7 +941,14 @@ class PanelSearchWidget extends St.BoxLayout {
                     this._updateSelection(this._menuItems);
                 }
             }
-        }).catch(e => console.error('Panel Search: File suggestion error:', e));
+        }).catch(e => {
+            if (!e.matches?.(Gio.IOErrorEnum, Gio.IOErrorEnum.CANCELLED)) {
+                console.error('Panel Search: File suggestion error:', e);
+            }
+        }).finally(() => {
+            if (this._fileSuggestCancellable === cancellable)
+                this._fileSuggestCancellable = null;
+        });
     }
 
     // ─── Core search logic ───────────────────────────────────────────────────
@@ -1198,7 +1035,7 @@ class PanelSearchWidget extends St.BoxLayout {
             const [type, value] = key.split(':');
             if (type !== 'web' || !value) continue;
 
-            if (lowerQuery.length >= 2 && this._fuzzyScore(lowerQuery, value, true) >= 70) {
+            if (lowerQuery.length >= 2 && fuzzyScore(lowerQuery, value, true) >= 70) {
                 const daysSince = (now - data.lastUsed) / (1000 * 60 * 60 * 24);
                 completions.push({
                     label: value,
@@ -1261,7 +1098,7 @@ class PanelSearchWidget extends St.BoxLayout {
             if (!app || !app.get_name()) continue;
 
             const name = app.get_name();
-            if (lowerQuery.length >= 2 && this._fuzzyScore(lowerQuery, name.toLowerCase(), true) >= 70) {
+            if (lowerQuery.length >= 2 && fuzzyScore(lowerQuery, name.toLowerCase(), true) >= 70) {
                 const daysSince = (now - data.lastUsed) / (1000 * 60 * 60 * 24);
                 candidates.push({
                     label: name,
@@ -1281,9 +1118,9 @@ class PanelSearchWidget extends St.BoxLayout {
 
         const addAppsFromCache = (cache, isSettings) => {
             for (const item of cache) {
-                const score = (this._fuzzyScore(lowerQuery, item.nameLower, true) * 2) +
-                             this._fuzzyScore(lowerQuery, item.descLower, true) +
-                             this._fuzzyScore(lowerQuery, item.keywordsLower, true);
+                const score = (fuzzyScore(lowerQuery, item.nameLower, true) * 2) +
+                             fuzzyScore(lowerQuery, item.descLower, true) +
+                             fuzzyScore(lowerQuery, item.keywordsLower, true);
                 if (score > 0) {
                     candidates.push({
                         label: item.name,
@@ -1337,15 +1174,6 @@ class PanelSearchWidget extends St.BoxLayout {
             files.forEach(row => this._addResult(row.label, row.subtitle, row.action, row.icon));
         }
 
-        const fileWarning = this._settings.get_boolean('enable-file-search') &&
-            this._trackerFileSearchDisabled &&
-            files.length === 0;
-        if (fileWarning) {
-            if (completions.length > 0 || packages.length > 0 || files.length > 0)
-                this._resultsMenu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem());
-            this._addResult('File search unavailable', 'Tracker3 is unavailable; toggle file search to retry', null, 'dialog-warning-symbolic');
-        }
-
         const weather = this._settings.get_boolean('enable-weather-search')
             ? this._weatherSuggestions.slice(0, WEATHER_SUGGESTIONS_MAX)
             : [];
@@ -1361,12 +1189,12 @@ class PanelSearchWidget extends St.BoxLayout {
             : 5;
         const local = this._getLocalSection(query, lowerQuery, usageData, now, safeMaxPredictions);
         if (local.length > 0) {
-            if (completions.length > 0 || packages.length > 0 || files.length > 0 || fileWarning || weather.length > 0)
+            if (completions.length > 0 || packages.length > 0 || files.length > 0 || weather.length > 0)
                 this._resultsMenu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem());
             local.forEach(row => this._addResult(row.label, row.subtitle, row.action, row.icon));
         }
 
-        if (completions.length > 0 || packages.length > 0 || files.length > 0 || fileWarning || weather.length > 0 || local.length > 0)
+        if (completions.length > 0 || packages.length > 0 || files.length > 0 || weather.length > 0 || local.length > 0)
             this._resultsMenu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem());
 
         const engineName = engine.charAt(0).toUpperCase() + engine.slice(1);
@@ -1504,38 +1332,6 @@ class PanelSearchWidget extends St.BoxLayout {
         const toLiters = {l: 1, ml: 0.001, gal: 3.78541, qt: 0.946353, pt: 0.473176, cup: 0.236588};
         if (!toLiters[from] || !toLiters[to]) return null;
         return value * toLiters[from] / toLiters[to];
-    }
-
-    // ─── Fuzzy scoring ───────────────────────────────────────────────────────
-
-    _fuzzyScore(query, text, preLowercased = false) {
-        if (!text) return 0;
-
-        const q = preLowercased ? query : query.toLowerCase();
-        const t = preLowercased ? text : text.toLowerCase();
-
-        if (q === t) return 100;
-
-        let score = 0;
-        let qi = 0;
-        let consecutive = 0;
-
-        for (let i = 0; i < t.length && qi < q.length; i++) {
-            if (t[i] === q[qi]) {
-                qi++;
-                consecutive++;
-                score += 10 + (consecutive * 5);
-            } else {
-                consecutive = 0;
-                score -= 1;
-            }
-        }
-
-        // All query characters must match
-        if (qi < q.length) return 0;
-
-        // No artificial floor — callers gate on score > 0
-        return Math.max(0, score);
     }
 
     // ─── Cleanup ─────────────────────────────────────────────────────────────

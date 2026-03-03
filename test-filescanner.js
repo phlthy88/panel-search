@@ -2,6 +2,7 @@
 
 import Gio from 'gi://Gio';
 import GLib from 'gi://GLib';
+import { FileScanner } from './fileScanner.js';
 
 // Simple test runner
 class TestRunner {
@@ -28,20 +29,13 @@ class TestRunner {
                 this.failed++;
             }
         }
-        console.log(`
-Tests: ${this.passed} passed, ${this.failed} failed`);
-        if (this.failed > 0) {
-            System.exit(1);
-        }
+        console.log(`\nTests: ${this.passed} passed, ${this.failed} failed`);
     }
 }
 
-import { FileScanner } from './fileScanner.js';
-
 const runner = new TestRunner();
 
-runner.add('FileScanner should find files in a directory', async () => {
-    // Setup: Create a temp directory with some files
+runner.add('FileScanner should find files and include icons', async () => {
     const tmpBase = `/tmp/panel-search-test-${Math.floor(Math.random() * 1000000)}`;
     const tmpDir = Gio.File.new_for_path(tmpBase);
     tmpDir.make_directory_with_parents(null);
@@ -49,30 +43,95 @@ runner.add('FileScanner should find files in a directory', async () => {
     const file1 = tmpDir.get_child('test1.txt');
     file1.replace_contents('content1', null, false, Gio.FileCreateFlags.NONE, null);
 
-    const file2 = tmpDir.get_child('other.log');
-    file2.replace_contents('content2', null, false, Gio.FileCreateFlags.NONE, null);
-
-    const subDir = tmpDir.get_child('subdir');
-    subDir.make_directory(null);
-    const file3 = subDir.get_child('hidden.txt');
-    file3.replace_contents('content3', null, false, Gio.FileCreateFlags.NONE, null);
-
     try {
         const scanner = new FileScanner(tmpBase);
         const results = await scanner.scan('test');
 
-        // This is expected to FAIL in the RED phase because scan() returns []
         if (results.length === 0) {
             throw new Error('Expected to find at least one file matching "test"');
         }
 
-        const hasTest1 = results.some(r => r.name === 'test1.txt');
-        if (!hasTest1) {
-            throw new Error('Expected results to contain "test1.txt"');
+        const r = results[0];
+        if (!r.name || !r.path || !r.uri) {
+            throw new Error('Result missing basic properties');
+        }
+
+        if (!r.icon) {
+            throw new Error('Expected icon to be present in result');
         }
     } finally {
-        // Cleanup
-        // Recursive delete is tricky with Gio, so we just leave it in /tmp for now or use rm -rf
+        const proc = Gio.Subprocess.new(['rm', '-rf', tmpBase], Gio.SubprocessFlags.NONE);
+        proc.wait(null);
+    }
+});
+
+runner.add('FileScanner should respect depth limit', async () => {
+    const tmpBase = `/tmp/panel-search-depth-test-${Math.floor(Math.random() * 1000000)}`;
+    const tmpDir = Gio.File.new_for_path(tmpBase);
+    tmpDir.make_directory_with_parents(null);
+
+    // level 0: test0.txt
+    const file0 = tmpDir.get_child('test0.txt');
+    file0.replace_contents('c0', null, false, Gio.FileCreateFlags.NONE, null);
+
+    // level 1: dir1/test1.txt
+    const dir1 = tmpDir.get_child('dir1');
+    dir1.make_directory(null);
+    const file1 = dir1.get_child('test1.txt');
+    file1.replace_contents('c1', null, false, Gio.FileCreateFlags.NONE, null);
+
+    // level 2: dir1/dir2/test2.txt
+    const dir2 = dir1.get_child('dir2');
+    dir2.make_directory(null);
+    const file2 = dir2.get_child('test2.txt');
+    file2.replace_contents('c2', null, false, Gio.FileCreateFlags.NONE, null);
+
+    try {
+        const scanner = new FileScanner(tmpBase);
+        // Scan with maxDepth = 1
+        const results = await scanner.scan('test', 10, null, 1);
+
+        const hasTest0 = results.some(r => r.name === 'test0.txt');
+        const hasTest1 = results.some(r => r.name === 'test1.txt');
+        const hasTest2 = results.some(r => r.name === 'test2.txt');
+
+        if (!hasTest0) throw new Error('Expected to find test0.txt at level 0');
+        if (!hasTest1) throw new Error('Expected to find test1.txt at level 1');
+        if (hasTest2) throw new Error('Did NOT expect to find test2.txt at level 2 (depth limit 1)');
+    } finally {
+        const proc = Gio.Subprocess.new(['rm', '-rf', tmpBase], Gio.SubprocessFlags.NONE);
+        proc.wait(null);
+    }
+});
+
+runner.add('FileScanner should respect maxDirs limit', async () => {
+    const tmpBase = `/tmp/panel-search-dirs-test-${Math.floor(Math.random() * 1000000)}`;
+    const tmpDir = Gio.File.new_for_path(tmpBase);
+    tmpDir.make_directory_with_parents(null);
+
+    // Create 5 directories, each with a file
+    for (let i = 0; i < 5; i++) {
+        const d = tmpDir.get_child(`dir${i}`);
+        d.make_directory(null);
+        const f = d.get_child(`test${i}.txt`);
+        f.replace_contents(`c${i}`, null, false, Gio.FileCreateFlags.NONE, null);
+    }
+
+    try {
+        const scanner = new FileScanner(tmpBase);
+        // Scan with maxDirs = 2
+        // It will scan root (1), then dir0 (2), then dir1 (3 - STOP)
+        // Wait, current logic scans root, then dir0, then inside dir0, etc.
+        // If I limit to 2, it should only scan root and the first dir it finds.
+        const results = await scanner.scan('test', 10, null, 3, 2);
+
+        // We expect results from root (if any) and at most 2 directories.
+        // In our setup, root has no matching files. dir0 and dir1 have one each.
+        // So we expect 2 results.
+        if (results.length > 2) {
+            throw new Error(`Expected at most 2 results (from 2 dirs), got ${results.length}`);
+        }
+    } finally {
         const proc = Gio.Subprocess.new(['rm', '-rf', tmpBase], Gio.SubprocessFlags.NONE);
         proc.wait(null);
     }

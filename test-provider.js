@@ -4,8 +4,9 @@ import Gio from 'gi://Gio';
 import GLib from 'gi://GLib';
 import { FileScanner } from './fileScanner.js';
 import { fuzzyScore } from './fuzzyMatch.js';
+import { FileSearchProvider } from './fileProvider.js';
 
-// Simple test runner (copied and simplified)
+// Simple test runner
 class TestRunner {
     constructor() {
         this.passed = 0;
@@ -29,16 +30,13 @@ class TestRunner {
                 this.failed++;
             }
         }
-        console.log(`
-Tests: ${this.passed} passed, ${this.failed} failed`);
+        console.log(`\nTests: ${this.passed} passed, ${this.failed} failed`);
     }
 }
 
-import { FileSearchProvider } from './fileProvider.js';
-
 const runner = new TestRunner();
 
-runner.add('FileSearchProvider should return ranked suggestions', async () => {
+runner.add('FileSearchProvider should return ranked suggestions with icons', async () => {
     const tmpBase = `/tmp/panel-search-provider-test-${Math.floor(Math.random() * 1000000)}`;
     const tmpDir = Gio.File.new_for_path(tmpBase);
     tmpDir.make_directory_with_parents(null);
@@ -46,7 +44,6 @@ runner.add('FileSearchProvider should return ranked suggestions', async () => {
     file.replace_contents('test content', null, false, Gio.FileCreateFlags.NONE, null);
 
     try {
-        // Mock provider to scan the temp directory instead of home
         const provider = new FileSearchProvider({});
         provider._scanner = new FileScanner(tmpBase);
         
@@ -56,8 +53,17 @@ runner.add('FileSearchProvider should return ranked suggestions', async () => {
             throw new Error('Expected at least one suggestion for query "provider"');
         }
 
-        if (suggestions[0].label !== 'provider-test-file.txt') {
-            throw new Error(`Expected "provider-test-file.txt", got "${suggestions[0].label}"`);
+        const s = suggestions[0];
+        if (s.label !== 'provider-test-file.txt') {
+            throw new Error(`Expected "provider-test-file.txt", got "${s.label}"`);
+        }
+
+        if (!s.icon) {
+            throw new Error('Expected icon to be present in suggestion');
+        }
+        
+        if (!s.subtitle || !s.subtitle.includes(tmpBase)) {
+            throw new Error('Expected subtitle to contain the file path');
         }
     } finally {
         const proc = Gio.Subprocess.new(['rm', '-rf', tmpBase], Gio.SubprocessFlags.NONE);

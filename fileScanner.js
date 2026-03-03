@@ -16,12 +16,13 @@ export class FileScanner {
      * @param {Gio.Cancellable} cancellable - Cancellable for the operation.
      * @returns {Promise<Array>} - Array of file results.
      */
-    async scan(query, maxResults = 10, cancellable = null) {
+    async scan(query, maxResults = 10, cancellable = null, maxDepth = 3, maxDirs = 100) {
         const results = [];
         const lowerQuery = query.toLowerCase();
+        const state = { dirsScanned: 0 };
 
         try {
-            await this._enumerateRecursive(this.root, lowerQuery, results, maxResults, cancellable);
+            await this._enumerateRecursive(this.root, lowerQuery, results, maxResults, cancellable, 0, maxDepth, state, maxDirs);
         } catch (e) {
             if (!e.matches?.(Gio.IOErrorEnum, Gio.IOErrorEnum.CANCELLED)) {
                 console.error('FileScanner: Scan failed:', e);
@@ -31,13 +32,17 @@ export class FileScanner {
         return results;
     }
 
-    async _enumerateRecursive(directory, lowerQuery, results, maxResults, cancellable) {
+    async _enumerateRecursive(directory, lowerQuery, results, maxResults, cancellable, currentDepth, maxDepth, state, maxDirs) {
         if (cancellable?.is_cancelled()) return;
         if (results.length >= maxResults) return;
+        if (currentDepth > maxDepth) return;
+        if (state.dirsScanned >= maxDirs) return;
+
+        state.dirsScanned++;
 
         const enumerator = await new Promise((resolve, reject) => {
             directory.enumerate_children_async(
-                'standard::name,standard::type',
+                'standard::name,standard::type,standard::icon',
                 Gio.FileQueryInfoFlags.NONE,
                 GLib.PRIORITY_DEFAULT,
                 cancellable,
@@ -80,14 +85,15 @@ export class FileScanner {
                 if (type === Gio.FileType.DIRECTORY) {
                     // Skip hidden directories like .git
                     if (!name.startsWith('.')) {
-                        await this._enumerateRecursive(child, lowerQuery, results, maxResults, cancellable);
+                        await this._enumerateRecursive(child, lowerQuery, results, maxResults, cancellable, currentDepth + 1, maxDepth, state, maxDirs);
                     }
                 } else if (type === Gio.FileType.REGULAR) {
                     if (name.toLowerCase().includes(lowerQuery)) {
                         results.push({
                             name: name,
                             path: child.get_path(),
-                            uri: child.get_uri()
+                            uri: child.get_uri(),
+                            icon: info.get_icon()
                         });
                     }
                 }

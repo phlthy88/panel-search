@@ -22,7 +22,7 @@ export class FileSearchProvider {
     async getSuggestions(query, maxResults = 10, cancellable = null) {
         if (!query || query.length < 3) return [];
 
-        const rawFiles = await this._scanner.scan(query, maxResults * 5, cancellable);
+        const rawFiles = await this._scanner.scan(query, maxResults * 5, cancellable, 2, 50);
         if (cancellable?.is_cancelled()) return [];
 
         const lowerQuery = query.toLowerCase();
@@ -37,7 +37,7 @@ export class FileSearchProvider {
         return ranked.map(f => ({
             label: f.name,
             subtitle: f.path,
-            icon: 'text-x-generic-symbolic',
+            icon: f.icon || 'text-x-generic-symbolic',
             action: () => {
                 const file = Gio.File.new_for_uri(f.uri);
                 Gio.AppInfo.launch_default_for_uri(file.get_uri(), null);
