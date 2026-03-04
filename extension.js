@@ -170,7 +170,8 @@ class PanelSearchWidget extends St.BoxLayout {
         this._resultsMenuActor.add_style_class_name('panel-search-results');
         Main.uiGroup.add_child(this._resultsMenuActor);
         this._resultsMenuActor.hide();
-        this._menuManager = null;
+        this._menuManager = new PopupMenu.PopupMenuManager(this);
+        this._menuManager.addMenu(this._resultsMenu);
         this._localSectionCacheQuery = null;
         this._localSectionCacheMaxResults = null;
         this._localSectionCache = [];
@@ -496,6 +497,8 @@ class PanelSearchWidget extends St.BoxLayout {
 
     _injectWebSuggestions(query) {
         this._fetchWebSuggestions(query).then(suggestions => {
+            if (this._isDestroyed || !this._settings)
+                return;
             const engine = getSafeSearchEngine(this._settings.get_string('search-engine'));
             const newSuggestions = (suggestions ?? []).slice(0, 5).map(phrase => ({
                 label: phrase,
@@ -739,6 +742,8 @@ class PanelSearchWidget extends St.BoxLayout {
 
     _injectPackageSuggestions(query) {
         this._fetchPackageSuggestions(query).then(suggestions => {
+            if (this._isDestroyed || !this._settings)
+                return;
             this._applyAsyncSuggestions(
                 query,
                 suggestions ?? [],
@@ -877,6 +882,8 @@ class PanelSearchWidget extends St.BoxLayout {
 
     _injectWeatherSuggestion(query) {
         this._fetchWeatherSuggestion(query).then(suggestions => {
+            if (this._isDestroyed || !this._settings)
+                return;
             this._applyAsyncSuggestions(
                 query,
                 suggestions ?? [],
@@ -915,7 +922,7 @@ class PanelSearchWidget extends St.BoxLayout {
             );
         }).catch(e => {
             if (!e.matches?.(Gio.IOErrorEnum, Gio.IOErrorEnum.CANCELLED)) {
-                if (!this._searchEntry || this._searchEntry.get_text().trim() !== query)
+                if (this._isDestroyed || !this._searchEntry || !this._resultsMenu || this._searchEntry.get_text().trim() !== query)
                     return;
                 console.error('Panel Search: File suggestion error:', e);
                 this._fileSuggestions = [];
@@ -1395,17 +1402,19 @@ class PanelSearchWidget extends St.BoxLayout {
     }
 
     _applyAsyncSuggestions(query, suggestions, currentSuggestions, changeKeyFn, updateFn) {
-        if (this._isDestroyed || !this._searchEntry || this._searchEntry.get_text().trim() !== query || !suggestions?.length)
+        if (this._isDestroyed || !this._searchEntry || this._searchEntry.get_text().trim() !== query)
             return;
 
-        if (!this._didSuggestionKeysChange(suggestions, currentSuggestions, changeKeyFn))
+        const next = suggestions ?? [];
+
+        if (!this._didSuggestionKeysChange(next, currentSuggestions, changeKeyFn))
             return;
 
         const previousLabel = this._selectedIndex >= 0 && this._selectedIndex < this._menuItems.length
             ? this._menuItems[this._selectedIndex].label?.get_text?.()
             : null;
 
-        updateFn(suggestions);
+        updateFn(next);
         this._renderResults(query);
 
         if (previousLabel) {
@@ -1492,6 +1501,11 @@ class PanelSearchWidget extends St.BoxLayout {
         if (this._predictionEngine) {
             this._predictionEngine.destroy();
             this._predictionEngine = null;
+        }
+
+        if (this._menuManager) {
+            this._menuManager.removeMenu(this._resultsMenu);
+            this._menuManager = null;
         }
 
         if (this._resultsMenu) {

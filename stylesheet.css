@@ -1,17 +1,23 @@
 .panel-search-button {
-    -natural-hpadding: 0;
-    -minimum-hpadding: 0;
-    padding: 0;
-    background-color: transparent;
-    border-radius: 9999px;
-    background-clip: padding-box;
-    min-height: 28px;
+    -natural-hpadding: 0 !important;
+    -minimum-hpadding: 0 !important;
+    padding: 0 !important;
+    background-color: transparent !important;
+    border-radius: 9999px !important;
+    background-clip: padding-box !important;
+    min-height: 28px !important;
+    box-shadow: none !important;
+    border: none !important;
+    -st-background-image: none;
 }
 
 .panel-search-box {
     padding: 0;
     margin: 0;
     border-radius: 9999px;
+    background-color: transparent;
+    box-shadow: none;
+    border: none;
 }
 
 .panel-search-entry {
@@ -41,10 +47,11 @@
 .panel-search-button:active,
 .panel-search-button:checked,
 .panel-search-button:focus {
-    background-color: transparent;
-    box-shadow: none;
-    border-radius: 9999px;
-    background-clip: padding-box;
+    background-color: transparent !important;
+    box-shadow: none !important;
+    border-radius: 9999px !important;
+    background-clip: padding-box !important;
+    border: none !important;
 }
 
 .panel-search-entry-light {
