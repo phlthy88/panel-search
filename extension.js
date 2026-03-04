@@ -370,6 +370,8 @@ class PanelSearchWidget extends St.BoxLayout {
                 this._focusOutTimeoutId = GLib.timeout_add(GLib.PRIORITY_DEFAULT, 200, () => {
                     this._focusOutTimeoutId = null;
                     if (!this._searchEntry) return GLib.SOURCE_REMOVE;
+                    if (this._focusInSearchUI())
+                        return GLib.SOURCE_REMOVE;
                     if (!this._menuHovered)
                         this._hideResults();
                     return GLib.SOURCE_REMOVE;
@@ -397,8 +399,10 @@ class PanelSearchWidget extends St.BoxLayout {
     // ─── Visibility helpers ──────────────────────────────────────────────────
 
     _showResults() {
-        if (this._searchEntry.get_text().trim().length > 0)
+        if (this._searchEntry.get_text().trim().length > 0) {
             this._resultsMenu.open(true);
+            this._searchEntry.grab_key_focus();
+        }
     }
 
     _renderCurrentQuery() {
@@ -429,6 +433,31 @@ class PanelSearchWidget extends St.BoxLayout {
         try {
             global.stage?.set_key_focus?.(null);
         } catch (_e) {}
+    }
+
+    _actorContains(container, actor) {
+        if (!container || !actor)
+            return false;
+        if (container === actor)
+            return true;
+        if (typeof container.contains === 'function')
+            return container.contains(actor);
+
+        let current = actor;
+        while (current) {
+            if (current === container)
+                return true;
+            current = current.get_parent?.() ?? null;
+        }
+        return false;
+    }
+
+    _focusInSearchUI() {
+        const focusActor = global.stage?.get_key_focus?.() ?? null;
+        const textActor = this._searchEntry?.clutter_text ?? null;
+        return this._actorContains(textActor, focusActor) ||
+            this._actorContains(this._searchEntry, focusActor) ||
+            this._actorContains(this._resultsMenuActor, focusActor);
     }
 
     // ─── Debounced search ────────────────────────────────────────────────────
@@ -1266,8 +1295,10 @@ class PanelSearchWidget extends St.BoxLayout {
         if (this._selectedIndex >= this._menuItems.length)
             this._selectedIndex = this._menuItems.length - 1;
 
-        if (this._menuItems.length > 0)
+        if (this._menuItems.length > 0) {
             this._resultsMenu.open(true);
+            this._searchEntry.grab_key_focus();
+        }
     }
 
     // ─── Result row builder ──────────────────────────────────────────────────
