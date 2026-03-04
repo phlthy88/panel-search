@@ -189,7 +189,7 @@ export default class PanelSearchPreferences extends ExtensionPreferences {
         );
 
         const fileMaxDirectoriesRow = new Adw.SpinRow({
-            title: 'File Directory Scan Budget',
+            title: 'Maximum Folders to Search',
             subtitle: 'Maximum directories scanned per query (10-500)',
             adjustment: new Gtk.Adjustment({
                 lower: 10,
@@ -258,6 +258,12 @@ export default class PanelSearchPreferences extends ExtensionPreferences {
             settings.set_string('weather-units', selected);
         });
         providersGroup.add(weatherUnitsRow);
+        settings.bind(
+            'enable-weather-search',
+            weatherUnitsRow,
+            'sensitive',
+            Gio.SettingsBindFlags.GET
+        );
 
         const packageSearchRow = new Adw.SwitchRow({
             title: 'Package Search',
@@ -287,9 +293,15 @@ export default class PanelSearchPreferences extends ExtensionPreferences {
             Gio.SettingsBindFlags.DEFAULT
         );
         providersGroup.add(packageResultsRow);
+        settings.bind(
+            'enable-package-search',
+            packageResultsRow,
+            'sensitive',
+            Gio.SettingsBindFlags.GET
+        );
 
         const debounceRow = new Adw.SpinRow({
-            title: 'Search Debounce (ms)',
+            title: 'Search Delay (ms)',
             subtitle: 'Delay before search runs after typing (50-500 ms)',
             adjustment: new Gtk.Adjustment({
                 lower: 50,

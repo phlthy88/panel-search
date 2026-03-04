@@ -1,6 +1,7 @@
 import Gio from 'gi://Gio';
 import GLib from 'gi://GLib';
 import { FileScanner } from './fileScanner.js';
+import { getBoundedIntSetting } from './util/settings.js';
 
 /**
  * FileSearchProvider manages file discovery and ranking.
@@ -13,27 +14,11 @@ export class FileSearchProvider {
     }
 
     _getMaxScanDepth() {
-        let value;
-        try {
-            value = this._settings?.get_int?.('file-search-max-depth');
-        } catch (_e) {
-            return 2;
-        }
-        if (!Number.isFinite(value))
-            return 2;
-        return Math.max(1, Math.min(6, value));
+        return getBoundedIntSetting(this._settings, 'file-search-max-depth', 2, 1, 6);
     }
 
     _getMaxScanDirectories() {
-        let value;
-        try {
-            value = this._settings?.get_int?.('file-search-max-directories');
-        } catch (_e) {
-            return 50;
-        }
-        if (!Number.isFinite(value))
-            return 50;
-        return Math.max(10, Math.min(500, value));
+        return getBoundedIntSetting(this._settings, 'file-search-max-directories', 50, 10, 500);
     }
 
     _getConfiguredRootPath() {
@@ -61,6 +46,8 @@ export class FileSearchProvider {
     _getScanner() {
         const rootPath = this._getActiveRootPath();
         if (!this._scanner || this._scannerRootPath !== rootPath) {
+            if (this._scanner)
+                this._scanner.destroy();
             this._scanner = new FileScanner(rootPath);
             this._scannerRootPath = rootPath;
         }
@@ -93,8 +80,12 @@ export class FileSearchProvider {
             subtitle: f.path,
             icon: f.icon || 'text-x-generic-symbolic',
             action: () => {
-                const file = Gio.File.new_for_uri(f.uri);
-                Gio.AppInfo.launch_default_for_uri(file.get_uri(), null);
+                try {
+                    const file = Gio.File.new_for_uri(f.uri);
+                    Gio.AppInfo.launch_default_for_uri(file.get_uri(), null);
+                } catch (e) {
+                    console.error('Panel Search: Failed to open file:', e);
+                }
             }
         }));
     }

@@ -36,7 +36,8 @@
     opacity: 0.8;
 }
 
-.panel-search-results {
+.panel-search-results,
+.panel-search-results > * {
     min-width: 280px;
     max-width: 420px;
 }

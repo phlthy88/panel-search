@@ -18,9 +18,11 @@ zip -r "$ZIP_PATH" \
   fileProvider.js \
   fileScanner.js \
   fuzzyMatch.js \
+  predictionEngine.js \
   metadata.json \
   prefs.js \
   stylesheet.css \
+  util/settings.js \
   LICENSE \
   schemas/org.gnome.shell.extensions.panel-search.gschema.xml \
   schemas/gschemas.compiled

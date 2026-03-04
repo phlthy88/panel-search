@@ -11,6 +11,8 @@ import * as PopupMenu from 'resource:///org/gnome/shell/ui/popupMenu.js';
 import {Extension} from 'resource:///org/gnome/shell/extensions/extension.js';
 import { FileSearchProvider } from './fileProvider.js';
 import { fuzzyScore } from './fuzzyMatch.js';
+import { PredictionEngine } from './predictionEngine.js';
+import { getBoundedIntSetting } from './util/settings.js';
 
 const SEARCH_ENGINES = {
     google: 'https://www.google.com/search?q=',
@@ -18,12 +20,7 @@ const SEARCH_ENGINES = {
     bing: 'https://www.bing.com/search?q='
 };
 
-const HISTORY_DECAY_DAYS = 30;
-const MAX_HISTORY_ENTRIES = 100;
 const MAX_QUERY_LENGTH = 500;
-const RECENCY_WEIGHT = 0.3;
-const FREQUENCY_WEIGHT = 0.7;
-const RECENCY_HALF_LIFE_DAYS = 7;
 const DEFAULT_SEARCH_DEBOUNCE_MS = 150;
 const DEFAULT_PACKAGE_SUGGESTIONS_MAX = 4;
 const PACKAGE_MIN_QUERY_LENGTH = 2;
@@ -75,131 +72,6 @@ function getSafeWeatherUnits(rawUnits) {
 function getSuggestionSubtitle() {
     // Suggestion phrases are intentionally sourced from DuckDuckGo AC for broad availability.
     return 'Suggestion (DuckDuckGo)';
-}
-
-/**
- * Manages search predictions based on usage patterns
- */
-class PredictionEngine {
-    constructor(settings) {
-        this._settings = settings;
-        this._usageData = this._loadUsageData();
-    }
-
-    _loadUsageData() {
-        try {
-            const json = this._settings.get_string('usage-history');
-            const data = JSON.parse(json);
-
-            if (typeof data !== 'object' || data === null)
-                return {};
-
-            for (const [key, value] of Object.entries(data)) {
-                if (typeof value !== 'object' ||
-                    typeof value.count !== 'number' ||
-                    typeof value.lastUsed !== 'number') {
-                    delete data[key];
-                }
-            }
-
-            return data;
-        } catch (e) {
-            console.error('Failed to load usage history:', e);
-            return {};
-        }
-    }
-
-    _saveUsageData() {
-        try {
-            const json = JSON.stringify(this._usageData);
-            this._settings.set_string('usage-history', json);
-        } catch (e) {
-            console.error('Failed to save usage history:', e);
-        }
-    }
-
-    /**
-     * Record a search action for learning.
-     * @param {string} query - The search query or display name
-     * @param {string} type  - 'app' | 'setting' | 'web' | 'calc' | 'convert'
-     * @param {string|null} metadata - Canonical app ID for app/setting types
-     */
-    recordUsage(query, type, metadata = null) {
-        if (!query || typeof query !== 'string' || query.length === 0)
-            return;
-
-        let key;
-        if (type === 'app' || type === 'setting') {
-            if (!metadata) {
-                console.error(`recordUsage called for ${type} without metadata (appId)`);
-                return;
-            }
-            key = `${type}:${metadata}`;
-        } else {
-            key = `${type}:${query.toLowerCase().trim()}`;
-        }
-
-        const now = Date.now();
-
-        if (!this._usageData[key]) {
-            this._usageData[key] = {
-                count: 0,
-                lastUsed: now,
-                type,
-                metadata
-            };
-        }
-
-        this._usageData[key].count++;
-        this._usageData[key].lastUsed = now;
-
-        if (metadata !== null)
-            this._usageData[key].metadata = metadata;
-
-        this._pruneHistory();
-        this._saveUsageData();
-    }
-
-    _pruneHistory() {
-        const now = Date.now();
-        const maxAge = HISTORY_DECAY_DAYS * 24 * 60 * 60 * 1000;
-
-        for (const [key, data] of Object.entries(this._usageData)) {
-            if (now - data.lastUsed > maxAge)
-                delete this._usageData[key];
-        }
-
-        const entries = Object.entries(this._usageData);
-        if (entries.length <= MAX_HISTORY_ENTRIES)
-            return;
-
-        const sorted = entries
-            .map(([key, data]) => ({key, score: this._calculateScore(data, now)}))
-            .sort((a, b) => b.score - a.score);
-
-        for (const item of sorted.slice(MAX_HISTORY_ENTRIES))
-            delete this._usageData[item.key];
-    }
-
-    _calculateScore(data, now) {
-        const daysSinceUse = (now - data.lastUsed) / (24 * 60 * 60 * 1000);
-        const recencyScore = Math.exp(-daysSinceUse / RECENCY_HALF_LIFE_DAYS);
-        const frequencyScore = Math.log(data.count + 1);
-        return (recencyScore * RECENCY_WEIGHT) + (frequencyScore * FREQUENCY_WEIGHT);
-    }
-
-    getUsageData() {
-        return this._usageData;
-    }
-
-    reloadUsageData() {
-        this._usageData = this._loadUsageData();
-    }
-
-    destroy() {
-        this._usageData = null;
-        this._settings = null;
-    }
 }
 
 const PanelSearchWidget = GObject.registerClass(
@@ -255,6 +127,7 @@ class PanelSearchWidget extends St.BoxLayout {
             id: this._appSystem.connect('installed-changed', () => {
                 this._settingsAppsCache = null;
                 this._settingsOnlyCache = null;
+                this._invalidateLocalSectionCache();
                 this._scheduleAppCacheWarmup();
             })
         });
@@ -290,12 +163,15 @@ class PanelSearchWidget extends St.BoxLayout {
 
         // Results popup
         this._resultsMenu = new PopupMenu.PopupMenu(this, 0.5, St.Side.TOP);
-        this._resultsMenu.box.add_style_class_name('panel-search-results');
         this._resultsMenuActor = this._resultsMenu.actor ?? this._resultsMenu;
+        this._resultsMenuActor.add_style_class_name('panel-search-results');
         Main.uiGroup.add_child(this._resultsMenuActor);
         this._resultsMenuActor.hide();
         this._menuManager = new PopupMenu.PopupMenuManager(this);
         this._menuManager.addMenu(this._resultsMenu);
+        this._localSectionCacheQuery = null;
+        this._localSectionCacheMaxResults = null;
+        this._localSectionCache = [];
 
         // Signals
         const text = this._searchEntry.clutter_text;
@@ -306,6 +182,7 @@ class PanelSearchWidget extends St.BoxLayout {
             { obj: text, id: text.connect('key-press-event', (_actor, event) => this._onKeyPress(event)) },
             { obj: this._interfaceSettings, id: this._interfaceSettings.connect('changed::color-scheme', () => this._applyThemeClass()) },
             { obj: this._settings, id: this._settings.connect('changed::usage-history', () => {
+                this._invalidateLocalSectionCache();
                 if (this._predictionEngine)
                     this._predictionEngine.reloadUsageData();
             }) },
@@ -405,6 +282,12 @@ class PanelSearchWidget extends St.BoxLayout {
         }
     }
 
+    _invalidateLocalSectionCache() {
+        this._localSectionCacheQuery = null;
+        this._localSectionCacheMaxResults = null;
+        this._localSectionCache = [];
+    }
+
     _renderCurrentQuery() {
         if (!this._searchEntry || !this._resultsMenu)
             return;
@@ -426,9 +309,10 @@ class PanelSearchWidget extends St.BoxLayout {
         this._searchEntry.add_style_class_name(darkMode ? 'panel-search-entry-dark' : 'panel-search-entry-light');
     }
 
-    _hideResults() {
+    _hideResults(clearQuery = false) {
         this._resultsMenu.close(true);
-        this._searchEntry.set_text('');
+        if (clearQuery)
+            this._searchEntry.set_text('');
         this._selectedIndex = -1;
         try {
             global.stage?.set_key_focus?.(null);
@@ -507,12 +391,12 @@ class PanelSearchWidget extends St.BoxLayout {
             case Clutter.KEY_KP_Enter:
                 if (this._selectedIndex >= 0 && this._selectedIndex < items.length) {
                     items[this._selectedIndex].activate(event);
-                    this._hideResults();
+                    this._hideResults(true);
                 }
                 return Clutter.EVENT_STOP;
 
             case Clutter.KEY_Escape:
-                this._hideResults();
+                this._hideResults(true);
                 return Clutter.EVENT_STOP;
 
             default:
@@ -608,7 +492,7 @@ class PanelSearchWidget extends St.BoxLayout {
                         );
                     }, 'launching suggestion URI');
                     this._predictionEngine.recordUsage(phrase, 'web');
-                    this._hideResults();
+                    this._hideResults(true);
                 }
             }));
             this._applyAsyncSuggestions(
@@ -782,7 +666,7 @@ class PanelSearchWidget extends St.BoxLayout {
                         this._runActionSafely(() => {
                             this._activatePackageSuggestion(resultId, query);
                         }, `activating package suggestion ${resultId}`);
-                        this._hideResults();
+                        this._hideResults(true);
                     }
                 };
             });
@@ -806,10 +690,11 @@ class PanelSearchWidget extends St.BoxLayout {
         this._activatePackageCancellable = cancellable;
 
         this._ensureSoftwareProxy().then(proxy => {
-            if (this._isDestroyed || !this._searchEntry)
+            if (this._isDestroyed || !this._searchEntry || !proxy) {
+                if (this._activatePackageCancellable === cancellable)
+                    this._activatePackageCancellable = null;
                 return;
-            if (!proxy)
-                return;
+            }
 
             proxy.call(
                 'ActivateResult',
@@ -829,7 +714,11 @@ class PanelSearchWidget extends St.BoxLayout {
                     }
                 }
             );
-        }).catch(e => console.error('Panel Search: Software proxy activation failure:', e));
+        }).catch(e => {
+            if (this._activatePackageCancellable === cancellable)
+                this._activatePackageCancellable = null;
+            console.error('Panel Search: Software proxy activation failure:', e);
+        });
     }
 
     _injectPackageSuggestions(query) {
@@ -847,15 +736,7 @@ class PanelSearchWidget extends St.BoxLayout {
     }
 
     _getBoundedInt(key, defaultValue, min, max) {
-        let value;
-        try {
-            value = this._settings.get_int(key);
-        } catch (_e) {
-            return defaultValue;
-        }
-        if (!Number.isFinite(value))
-            return defaultValue;
-        return Math.max(min, Math.min(max, value));
+        return getBoundedIntSetting(this._settings, key, defaultValue, min, max);
     }
 
     _getFileSearchMaxResults() {
@@ -963,7 +844,7 @@ class PanelSearchWidget extends St.BoxLayout {
                 action: () => {
                     const weatherPage = `https://open-meteo.com/en/docs?latitude=${latitude}&longitude=${longitude}`;
                     this._runActionSafely(() => Gio.AppInfo.launch_default_for_uri(weatherPage, null), 'launching weather details URI');
-                    this._hideResults();
+                    this._hideResults(true);
                 }
             }];
         } catch (e) {
@@ -1018,11 +899,12 @@ class PanelSearchWidget extends St.BoxLayout {
             );
         }).catch(e => {
             if (!e.matches?.(Gio.IOErrorEnum, Gio.IOErrorEnum.CANCELLED)) {
+                if (!this._searchEntry || this._searchEntry.get_text().trim() !== query)
+                    return;
                 console.error('Panel Search: File suggestion error:', e);
                 this._fileSuggestions = [];
                 this._fileSearchError = 'File search unavailable';
-                if (this._searchEntry && this._searchEntry.get_text().trim() === query)
-                    this._renderResults(query);
+                this._renderResults(query);
             }
         }).finally(() => {
             if (this._fileSuggestCancellable === cancellable)
@@ -1047,6 +929,7 @@ class PanelSearchWidget extends St.BoxLayout {
             this._fileSearchError = null;
             this._weatherSuggestions = [];
             this._lastQuery = query;
+            this._invalidateLocalSectionCache();
         }
 
         if (query.length === 0) {
@@ -1085,6 +968,7 @@ class PanelSearchWidget extends St.BoxLayout {
         const all = this._appSystem.get_installed();
         this._settingsOnlyCache = [];
         this._settingsAppsCache = [];
+        this._invalidateLocalSectionCache();
 
         for (const appInfo of all) {
             const name = appInfo.get_name();
@@ -1131,7 +1015,7 @@ class PanelSearchWidget extends St.BoxLayout {
                             );
                         }, 'launching completion URI');
                         this._predictionEngine.recordUsage(value, 'web');
-                        this._hideResults();
+                        this._hideResults(true);
                     }
                 });
             }
@@ -1153,7 +1037,7 @@ class PanelSearchWidget extends St.BoxLayout {
                 icon: 'accessories-calculator-symbolic',
                 action: () => {
                     this._predictionEngine.recordUsage(query, 'calc');
-                    this._hideResults();
+                    this._hideResults(true);
                 }
             });
         }
@@ -1167,7 +1051,7 @@ class PanelSearchWidget extends St.BoxLayout {
                 icon: 'preferences-system-symbolic',
                 action: () => {
                     this._predictionEngine.recordUsage(query, 'convert');
-                    this._hideResults();
+                    this._hideResults(true);
                 }
             });
         }
@@ -1190,7 +1074,7 @@ class PanelSearchWidget extends St.BoxLayout {
                     action: () => {
                         this._runActionSafely(() => app.activate(), `activating app ${app.get_id()}`);
                         this._predictionEngine.recordUsage(name, type, app.get_id());
-                        this._hideResults();
+                        this._hideResults(true);
                     }
                 });
             }
@@ -1212,7 +1096,7 @@ class PanelSearchWidget extends St.BoxLayout {
                         action: () => {
                             this._runActionSafely(() => this._activateLocalCandidate(item), `activating local result ${item.appId ?? item.name}`);
                             this._predictionEngine.recordUsage(item.name, isSettings ? 'setting' : 'app', item.appId);
-                            this._hideResults();
+                            this._hideResults(true);
                         }
                     });
                 }
@@ -1234,53 +1118,68 @@ class PanelSearchWidget extends St.BoxLayout {
         const engine = getSafeSearchEngine(this._settings.get_string('search-engine'));
         const usageData = this._predictionEngine.getUsageData();
         const now = Date.now();
+        let hasContent = false;
 
         const completions = this._getCompletionSection(query, lowerQuery, engine, usageData, now);
-        completions.forEach(row => this._addResult(row.label, row.subtitle, row.action, row.icon));
+        if (completions.length > 0) {
+            completions.forEach(row => this._addResult(row.label, row.subtitle, row.action, row.icon));
+            hasContent = true;
+        }
 
         const packages = this._settings.get_boolean('enable-package-search')
             ? this._packageSuggestions.slice(0, this._getPackageSearchMaxResults())
             : [];
         if (packages.length > 0) {
-            if (completions.length > 0)
+            if (hasContent)
                 this._resultsMenu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem());
             packages.forEach(row => this._addResult(row.label, row.subtitle, row.action, row.icon));
+            hasContent = true;
         }
 
         const files = this._settings.get_boolean('enable-file-search')
             ? this._fileSuggestions.slice(0, this._getFileSearchMaxResults())
             : [];
         if (files.length > 0) {
-            if (completions.length > 0 || packages.length > 0)
+            if (hasContent)
                 this._resultsMenu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem());
             files.forEach(row => this._addResult(row.label, row.subtitle, row.action, row.icon));
+            hasContent = true;
         }
 
         const fileSearchError = this._settings.get_boolean('enable-file-search') ? this._fileSearchError : null;
         if (fileSearchError) {
-            if (completions.length > 0 || packages.length > 0 || files.length > 0)
+            if (hasContent)
                 this._resultsMenu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem());
             this._addResult('File Search', fileSearchError, null, 'dialog-warning-symbolic');
+            hasContent = true;
         }
 
         const weather = this._settings.get_boolean('enable-weather-search')
             ? this._weatherSuggestions.slice(0, WEATHER_SUGGESTIONS_MAX)
             : [];
         if (weather.length > 0) {
-            if (completions.length > 0 || packages.length > 0 || files.length > 0 || fileSearchError)
+            if (hasContent)
                 this._resultsMenu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem());
             weather.forEach(row => this._addResult(row.label, row.subtitle, row.action, row.icon));
+            hasContent = true;
         }
 
         const safeMaxPredictions = this._getBoundedInt('max-predictions', 5, 0, 5);
-        const local = this._getLocalSection(query, lowerQuery, usageData, now, safeMaxPredictions);
+        let local = this._localSectionCache;
+        if (this._localSectionCacheQuery !== query || this._localSectionCacheMaxResults !== safeMaxPredictions) {
+            local = this._getLocalSection(query, lowerQuery, usageData, now, safeMaxPredictions);
+            this._localSectionCacheQuery = query;
+            this._localSectionCacheMaxResults = safeMaxPredictions;
+            this._localSectionCache = local;
+        }
         if (local.length > 0) {
-            if (completions.length > 0 || packages.length > 0 || files.length > 0 || fileSearchError || weather.length > 0)
+            if (hasContent)
                 this._resultsMenu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem());
             local.forEach(row => this._addResult(row.label, row.subtitle, row.action, row.icon));
+            hasContent = true;
         }
 
-        if (completions.length > 0 || packages.length > 0 || files.length > 0 || fileSearchError || weather.length > 0 || local.length > 0)
+        if (hasContent)
             this._resultsMenu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem());
 
         const engineName = engine.charAt(0).toUpperCase() + engine.slice(1);
@@ -1289,7 +1188,7 @@ class PanelSearchWidget extends St.BoxLayout {
                 Gio.AppInfo.launch_default_for_uri(SEARCH_ENGINES[engine] + encodeURIComponent(query), null);
             }, 'launching search URI');
             this._predictionEngine.recordUsage(query, 'web');
-            this._hideResults();
+            this._hideResults(true);
         }, 'web-browser-symbolic');
 
         if (this._selectedIndex >= this._menuItems.length)
@@ -1304,10 +1203,15 @@ class PanelSearchWidget extends St.BoxLayout {
     // ─── Result row builder ──────────────────────────────────────────────────
 
     _addResult(title, subtitle, callback, icon) {
-        const iconName = typeof icon === 'string' ? icon : 'text-x-generic-symbolic';
+        let iconName = 'text-x-generic-symbolic';
+        if (typeof icon === 'string') {
+            iconName = icon;
+        } else if (icon?.get_names) {
+            const names = icon.get_names();
+            if (Array.isArray(names) && names.length > 0)
+                iconName = names[0];
+        }
         const item = new PopupMenu.PopupImageMenuItem(title, iconName);
-        if (icon && typeof icon !== 'string' && item?._icon && 'gicon' in item._icon)
-            item._icon.gicon = icon;
 
         if (subtitle) {
             const label = new St.Label({
@@ -1346,6 +1250,8 @@ class PanelSearchWidget extends St.BoxLayout {
         let pos = 0;
 
         const parseNumber = () => {
+            if (pos >= tokens.length)
+                throw new Error('Unexpected end of expression');
             const token = tokens[pos++];
             if (token === '(') {
                 const result = parseAddSub();
@@ -1450,6 +1356,41 @@ class PanelSearchWidget extends St.BoxLayout {
         throw new Error(`No launch path for local result "${item.appId ?? item.name}"`);
     }
 
+    _didSuggestionKeysChange(nextSuggestions, currentSuggestions, changeKeyFn) {
+        if (nextSuggestions.length !== currentSuggestions.length)
+            return true;
+
+        for (let i = 0; i < nextSuggestions.length; i++) {
+            if (changeKeyFn(nextSuggestions[i]) !== changeKeyFn(currentSuggestions[i]))
+                return true;
+        }
+
+        return false;
+    }
+
+    _applyAsyncSuggestions(query, suggestions, currentSuggestions, changeKeyFn, updateFn) {
+        if (this._isDestroyed || !this._searchEntry || this._searchEntry.get_text().trim() !== query || !suggestions?.length)
+            return;
+
+        if (!this._didSuggestionKeysChange(suggestions, currentSuggestions, changeKeyFn))
+            return;
+
+        const previousLabel = this._selectedIndex >= 0 && this._selectedIndex < this._menuItems.length
+            ? this._menuItems[this._selectedIndex].label?.get_text?.()
+            : null;
+
+        updateFn(suggestions);
+        this._renderResults(query);
+
+        if (previousLabel) {
+            const idx = this._menuItems.findIndex(item => item.label?.get_text?.() === previousLabel);
+            if (idx !== -1) {
+                this._selectedIndex = idx;
+                this._updateSelection(this._menuItems);
+            }
+        }
+    }
+
     destroy() {
         this._isDestroyed = true;
         this._menuHovered = false;
@@ -1546,30 +1487,6 @@ class PanelSearchWidget extends St.BoxLayout {
         super.destroy();
     }
 
-    _applyAsyncSuggestions(query, suggestions, currentSuggestions, changeKeyFn, updateFn) {
-        if (this._isDestroyed || !this._searchEntry || this._searchEntry.get_text().trim() !== query || !suggestions?.length)
-            return;
-
-        const changed = JSON.stringify(suggestions.map(changeKeyFn)) !==
-            JSON.stringify(currentSuggestions.map(changeKeyFn));
-        if (!changed)
-            return;
-
-        const previousLabel = this._selectedIndex >= 0 && this._selectedIndex < this._menuItems.length
-            ? this._menuItems[this._selectedIndex].label?.get_text?.()
-            : null;
-
-        updateFn(suggestions);
-        this._renderResults(query);
-
-        if (previousLabel) {
-            const idx = this._menuItems.findIndex(item => item.label?.get_text?.() === previousLabel);
-            if (idx !== -1) {
-                this._selectedIndex = idx;
-                this._updateSelection(this._menuItems);
-            }
-        }
-    }
 });
 
 export default class PanelSearchExtension extends Extension {
