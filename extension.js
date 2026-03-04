@@ -27,6 +27,8 @@ const PACKAGE_MIN_QUERY_LENGTH = 2;
 const DEFAULT_FILE_SUGGESTIONS_MAX = 6;
 const DEFAULT_FILE_MIN_QUERY_LENGTH = 3;
 const WEATHER_SUGGESTIONS_MAX = 1;
+const MIN_LOCAL_APP_QUERY_LENGTH = 2;
+const MAX_LOCAL_APP_EVALUATIONS = 250;
 const SOFTWARE_SEARCH_PROVIDER_BUS = 'org.gnome.Software';
 const SOFTWARE_SEARCH_PROVIDER_PATH = '/org/gnome/Software/SearchProvider';
 const SOFTWARE_SEARCH_PROVIDER_IFACE = 'org.gnome.Shell.SearchProvider2';
@@ -1094,10 +1096,20 @@ class PanelSearchWidget extends St.BoxLayout {
             }
         }
 
+        if (lowerQuery.length < MIN_LOCAL_APP_QUERY_LENGTH) {
+            candidates.sort((a, b) => b.score - a.score);
+            return candidates.slice(0, maxResults);
+        }
+
         if (!this._settingsAppsCache) this._buildAppCaches();
 
+        let evaluatedApps = 0;
         const addAppsFromCache = (cache, isSettings) => {
             for (const item of cache) {
+                if (evaluatedApps >= MAX_LOCAL_APP_EVALUATIONS)
+                    break;
+                evaluatedApps++;
+
                 const score = (fuzzyScore(lowerQuery, item.nameLower, true) * 2) +
                              fuzzyScore(lowerQuery, item.descLower, true) +
                              fuzzyScore(lowerQuery, item.keywordsLower, true);
