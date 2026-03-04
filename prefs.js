@@ -211,9 +211,20 @@ export default class PanelSearchPreferences extends ExtensionPreferences {
             Gio.SettingsBindFlags.GET
         );
 
+        const fileRootPathHelpRow = new Adw.ActionRow({
+            title: 'File Root Path Format',
+            subtitle: 'Use an absolute path or a path relative to home. Leave blank to search your home directory.'
+        });
+        providersGroup.add(fileRootPathHelpRow);
+        settings.bind(
+            'enable-file-search',
+            fileRootPathHelpRow,
+            'sensitive',
+            Gio.SettingsBindFlags.GET
+        );
+
         const fileRootPathRow = new Adw.EntryRow({
             title: 'File Search Root',
-            subtitle: 'Absolute path or path relative to home (blank = home directory)',
             show_apply_button: true,
         });
         settings.bind(
