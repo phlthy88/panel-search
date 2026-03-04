@@ -1,17 +1,21 @@
 .panel-search-button {
     -natural-hpadding: 0;
     -minimum-hpadding: 0;
+    padding: 0;
 }
 
 .panel-search-box {
     padding: 0;
+    margin: 0;
     border-radius: 9999px;
 }
 
 .panel-search-entry {
     min-width: 220px;
     max-width: 360px;
-    padding: 2px 12px;
+    min-height: 28px;
+    padding: 0 12px;
+    margin: 0;
     border-radius: 9999px;
 }
 

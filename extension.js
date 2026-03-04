@@ -168,8 +168,7 @@ class PanelSearchWidget extends St.BoxLayout {
         this._resultsMenuActor.add_style_class_name('panel-search-results');
         Main.uiGroup.add_child(this._resultsMenuActor);
         this._resultsMenuActor.hide();
-        this._menuManager = new PopupMenu.PopupMenuManager(this);
-        this._menuManager.addMenu(this._resultsMenu);
+        this._menuManager = null;
         this._localSectionCacheQuery = null;
         this._localSectionCacheMaxResults = null;
         this._localSectionCache = [];
@@ -1483,10 +1482,6 @@ class PanelSearchWidget extends St.BoxLayout {
             this._predictionEngine = null;
         }
 
-        if (this._menuManager) {
-            this._menuManager.destroy();
-            this._menuManager = null;
-        }
         if (this._resultsMenu) {
             this._resultsMenu.destroy();
             this._resultsMenu = null;
