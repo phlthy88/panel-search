@@ -1,5 +1,10 @@
+.panel-search-button {
+    -natural-hpadding: 0;
+    -minimum-hpadding: 0;
+}
+
 .panel-search-box {
-    padding: 0 6px;
+    padding: 0;
     border-radius: 9999px;
 }
 

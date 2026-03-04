@@ -120,6 +120,7 @@ class PanelSearchWidget extends St.BoxLayout {
         this._isDestroyed = false;
         this._signals = [];
         this._cacheWarmupId = null;
+        this._focusRestoreId = null;
 
         // Invalidate app cache when apps change
         this._signals.push({
@@ -278,7 +279,7 @@ class PanelSearchWidget extends St.BoxLayout {
     _showResults() {
         if (this._searchEntry.get_text().trim().length > 0) {
             this._resultsMenu.open(true);
-            this._searchEntry.grab_key_focus();
+            this._queueEntryFocus();
         }
     }
 
@@ -342,6 +343,20 @@ class PanelSearchWidget extends St.BoxLayout {
         return this._actorContains(textActor, focusActor) ||
             this._actorContains(this._searchEntry, focusActor) ||
             this._actorContains(this._resultsMenuActor, focusActor);
+    }
+
+    _queueEntryFocus() {
+        if (this._focusRestoreId || !this._searchEntry)
+            return;
+
+        this._focusRestoreId = GLib.idle_add(GLib.PRIORITY_DEFAULT_IDLE, () => {
+            this._focusRestoreId = null;
+            if (!this._searchEntry || this._isDestroyed)
+                return GLib.SOURCE_REMOVE;
+
+            this._searchEntry.grab_key_focus();
+            return GLib.SOURCE_REMOVE;
+        });
     }
 
     // ─── Debounced search ────────────────────────────────────────────────────
@@ -1196,7 +1211,7 @@ class PanelSearchWidget extends St.BoxLayout {
 
         if (this._menuItems.length > 0) {
             this._resultsMenu.open(true);
-            this._searchEntry.grab_key_focus();
+            this._queueEntryFocus();
         }
     }
 
@@ -1422,6 +1437,11 @@ class PanelSearchWidget extends St.BoxLayout {
             this._cacheWarmupId = null;
         }
 
+        if (this._focusRestoreId) {
+            GLib.source_remove(this._focusRestoreId);
+            this._focusRestoreId = null;
+        }
+
         if (this._suggestCancellable) {
             this._suggestCancellable.cancel();
             this._suggestCancellable = null;
@@ -1535,6 +1555,7 @@ export default class PanelSearchExtension extends Extension {
             this._settings = this.getSettings();
             this._widget = new PanelSearchWidget(this._settings);
             this._button = new PanelMenu.Button(0.5, 'Panel Search', true);
+            this._button.add_style_class_name('panel-search-button');
             this._button.add_child(this._widget);
             this._buttonAdded = false;
             this._settingsSignals = [];
