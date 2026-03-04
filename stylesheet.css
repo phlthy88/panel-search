@@ -2,6 +2,10 @@
     -natural-hpadding: 0;
     -minimum-hpadding: 0;
     padding: 0;
+    background-color: transparent;
+    border-radius: 9999px;
+    background-clip: padding-box;
+    min-height: 28px;
 }
 
 .panel-search-box {
@@ -17,6 +21,30 @@
     padding: 0 12px;
     margin: 0;
     border-radius: 9999px;
+}
+
+.panel-search-button:hover .panel-search-entry,
+.panel-search-button:active .panel-search-entry,
+.panel-search-button:checked .panel-search-entry {
+    border-color: rgba(28, 113, 216, 0.6);
+}
+
+.panel-search-button:hover .panel-search-entry-light {
+    background-color: rgba(0, 0, 0, 0.12);
+}
+
+.panel-search-button:hover .panel-search-entry-dark {
+    background-color: rgba(255, 255, 255, 0.14);
+}
+
+.panel-search-button:hover,
+.panel-search-button:active,
+.panel-search-button:checked,
+.panel-search-button:focus {
+    background-color: transparent;
+    box-shadow: none;
+    border-radius: 9999px;
+    background-clip: padding-box;
 }
 
 .panel-search-entry-light {
